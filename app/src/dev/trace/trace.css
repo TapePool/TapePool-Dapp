@@ -1,0 +1,134 @@
+.trace-main{max-width:none!important;padding:0!important;gap:0!important;min-height:0}
+.trace-main,.trace-main>[data-trace-owned],.trace,.trace-board,.trace-drawer{min-width:0;max-width:100%}
+.trace-main>[data-trace-owned]{display:flex;flex:1;flex-direction:column;width:100%;min-height:0;overflow:clip}
+.trace{display:flex;flex:1;flex-direction:column;min-height:0;overflow:clip;background:#0B1530}
+.trace button{font:inherit;color:inherit;cursor:pointer}
+.trace-board{position:relative;flex:1;min-height:400px;overflow:hidden}
+.trace-plot-scroll{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-color:#1B2B54 #0B1530;scrollbar-width:thin}
+.trace-plot{position:relative;width:100%;min-width:1000px;height:100%}
+.trace-board canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.trace-window{position:absolute;top:0;right:50px;bottom:28px;left:0;overflow:hidden}
+.trace-scroll{position:absolute;left:0;top:0;overflow:visible;will-change:transform}
+/* The app's engineering background (.v2: 80px lines, 16px fine grid) across the whole plot, positioned on the price/time lattice by the view. */
+.trace-circuit{position:absolute;top:0;right:50px;bottom:28px;left:0;pointer-events:none;background-image:linear-gradient(rgba(111,195,236,.075) 1px,transparent 1px),linear-gradient(90deg,rgba(111,195,236,.075) 1px,transparent 1px),linear-gradient(rgba(111,195,236,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(111,195,236,.03) 1px,transparent 1px);background-size:80px 80px,80px 80px,16px 16px,16px 16px}
+.trace-grid{display:grid;grid-template-columns:repeat(32,80px);grid-auto-rows:80px;overflow:clip}
+/* Bettable cells read as contact pads on the circuit grid: an inset tinted pad behind the multiplier. */
+.trace .trace-cell{position:relative;z-index:0;width:80px;height:80px;padding:0;border:0;border-radius:0;background:transparent;font:12px 'JetBrains Mono',monospace;color:#B6C8DF}
+.trace .trace-cell::before{content:'';position:absolute;inset:4px;z-index:-1;border:1px solid rgba(111,195,236,.18);border-radius:4px;background:rgba(46,155,218,.08);pointer-events:none;transition:background .12s,border-color .12s}
+.trace .trace-cell:hover{color:#FFFFFF}
+.trace .trace-cell:hover::before{border-color:rgba(111,195,236,.55);background:rgba(46,155,218,.18)}
+.trace .trace-cell:focus-visible{outline:2px solid #2E9BDA;outline-offset:-3px;color:#FFFFFF}
+.trace .trace-cell:focus-visible::before{background:rgba(46,155,218,.16)}
+.trace .trace-cell.placed{color:#FFFFFF}
+.trace .trace-cell.placed::before{display:none}
+.trace-grid.frozen .trace-cell{opacity:.45;cursor:not-allowed}
+.trace-result{position:absolute;right:20px;top:20px;z-index:4;display:flex;align-items:center;gap:12px;max-width:calc(100% - 40px);padding:14px 18px;background:#0E1D3D;border:1px solid rgba(111,195,236,.22);border-left:3px solid #2FC28A;border-radius:8px;pointer-events:none}
+.trace-result[hidden]{display:none}
+.trace-result-icon{display:flex;align-items:center;justify-content:center;flex:0 0 34px;height:34px;border-radius:50%;background:rgba(47,194,138,.12);color:#2FC28A;font:600 22px Sora,sans-serif}
+.trace-result-title{display:block;margin-bottom:5px;font-size:17px;line-height:1.3;letter-spacing:-.02em}
+.trace-result-return,.trace-result-loss{display:block;font:12px/1.6 'JetBrains Mono',monospace}
+.trace-result-return{color:#2FC28A}.trace-result-loss{color:#F58A9A}
+.trace-result-return:empty,.trace-result-loss:empty{display:none}
+.trace-result[data-outcome="lost"]{border-left-color:#F0566B}
+.trace-result[data-outcome="lost"] .trace-result-icon{background:rgba(240,86,107,.12);color:#F58A9A}
+.trace-result[data-outcome="mixed"]{border-left-color:#6FC3EC}
+.trace-result[data-outcome="mixed"] .trace-result-icon{background:rgba(111,195,236,.12);color:#6FC3EC}
+
+.trace-market,.trace-stake,.trace-quote,.trace-status{position:absolute;z-index:2}
+.trace-market{left:20px;top:20px;width:224px;padding:13px 14px 10px;background:#0E1D3D;border:1px solid rgba(111,195,236,.18);border-radius:8px}
+.trace-market-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.trace-market-row strong{font-size:12px;font-weight:600;letter-spacing:.01em}
+.trace-source{display:inline-flex;align-items:center;gap:5px;color:#8A9AB2;font:9px 'JetBrains Mono',monospace;letter-spacing:.07em;white-space:nowrap}
+.trace-source::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.trace-source[data-state="live"]{color:#2FC28A}
+.trace-source[data-state="wait"]{color:#F2B84B}
+.trace-feed{position:absolute;top:50%;left:50%;z-index:3;max-width:min(420px,calc(100% - 40px));padding:12px 16px;border:1px solid rgba(242,184,75,.35);border-radius:8px;background:#0E1D3D;color:#E6EDF7;font-size:12px;line-height:1.5;text-align:center;transform:translate(-50%,-50%);pointer-events:none}
+.trace-feed[hidden]{display:none}
+.trace-market-value{display:flex;align-items:baseline;gap:10px;margin-top:6px}
+.trace-price{font:500 21px/1.4 'JetBrains Mono',monospace;letter-spacing:-.04em;color:#FFFFFF}
+.trace-info{font-size:9px;color:#8A9AB2;white-space:nowrap}
+
+.trace-stake{left:20px;bottom:42px;width:244px;padding:14px;background:#0E1D3D;border:1px solid rgba(111,195,236,.20);border-radius:8px}
+.trace-balance-row{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 8px;margin-bottom:15px}
+.trace-balance-row{border-radius:3px;background:rgba(47,194,138,var(--return-glow,0));box-shadow:0 0 0 5px rgba(47,194,138,var(--return-glow,0))}
+.trace-balance-row[data-returning="true"] .trace-balance{color:#2FC28A}
+.trace-balance-label{font-size:10px;color:#8A9AB2}
+.trace-balance{font:500 12px 'JetBrains Mono',monospace;color:#FFFFFF}
+.trace-stake label{display:block;margin-bottom:6px;color:#8A9AB2;font-size:10px}
+.trace-input{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(111,195,236,.23);border-radius:5px;background:#0B1530}
+.trace-input:focus-within{border-color:#2E9BDA}
+.trace-input input{min-width:0;width:100%;height:25px;padding:0;border:0;background:transparent;color:#FFFFFF;font:500 20px 'JetBrains Mono',monospace;outline:none}
+.trace-input span{color:#8A9AB2;font:10px 'JetBrains Mono',monospace}
+.trace-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:8px}
+.trace-presets button{height:27px;padding:0 4px;border:1px solid rgba(111,195,236,.11);border-radius:4px;background:rgba(255,255,255,.025);color:#B6C8DF;font:10px 'JetBrains Mono',monospace}
+.trace-presets button:hover,.trace-presets button[aria-pressed="true"]{border-color:rgba(46,155,218,.55);background:rgba(46,155,218,.10);color:#FFFFFF}
+.trace-stake-foot{display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-top:12px;color:#8A9AB2;font-size:10px}
+.trace-explain{font-size:10px;line-height:1.4}
+.trace-help summary{cursor:pointer;color:#B6C8DF;font-size:10px;list-style:none;text-decoration:underline;text-decoration-color:rgba(111,195,236,.3);text-underline-offset:3px}
+.trace-help summary::-webkit-details-marker{display:none}
+.trace-help p{position:absolute;left:0;right:0;bottom:calc(100% + 8px);margin:0;padding:13px 14px;border:1px solid rgba(111,195,236,.25);border-radius:6px;background:#0E1D3D;color:#B6C8DF;font-size:11px;line-height:1.6}
+.trace-quote{left:36%;bottom:37px;max-width:58%;color:#8A9AB2;font:10px/1.5 'JetBrains Mono',monospace;pointer-events:none}
+.trace-status{bottom:15px;left:20px;max-width:calc(100% - 40px);color:#6FC3EC;font-size:10px;line-height:1.4}
+
+.trace-drawer{background:#0B1530;border-top:1px solid rgba(111,195,236,.14)}
+.trace-drawerbar{display:flex;align-items:center;gap:16px;min-height:42px;padding:0 16px}
+.trace-tabs{display:flex;align-self:stretch;gap:4px}
+.trace .trace-tabs button{display:inline-flex;align-items:center;gap:7px;min-height:42px;padding:0 10px;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:#8A9AB2;font-size:12px;font-weight:600}
+.trace .trace-tabs button:hover{color:#FFFFFF}
+.trace .trace-tabs button.active{color:#FFFFFF;border-bottom-color:#2E9BDA}
+.trace-count{min-width:20px;height:18px;padding:0 6px;border-radius:999px;background:rgba(255,255,255,.06);color:#B6C8DF;font:500 10px/18px 'JetBrains Mono',monospace;text-align:center}
+.trace-tabs .active .trace-count{background:rgba(46,155,218,.2);color:#6FC3EC}
+.trace-summary{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:flex-end;gap:4px 18px;min-width:0;margin-left:auto}
+.trace-stat{display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap}
+.trace-stat small{color:#8A9AB2;font-size:10px}
+.trace-stat b{color:#FFFFFF;font:500 11px 'JetBrains Mono',monospace}
+.trace-stat b[data-tone="won"]{color:#2FC28A}.trace-stat b[data-tone="lost"]{color:#F58A9A}
+.trace .trace-toggle{display:inline-flex;flex:none;align-items:center;gap:8px;height:28px;padding:0 10px;border:1px solid rgba(111,195,236,.14);border-radius:4px;background:rgba(255,255,255,.025);color:#B6C8DF;font-size:11px}
+.trace .trace-toggle:hover{border-color:rgba(111,195,236,.35);background:rgba(46,155,218,.10);color:#FFFFFF}
+.trace-toggle::after{content:'';width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(2px) rotate(-135deg)}
+.trace-toggle[aria-expanded="true"]::after{transform:translateY(-2px) rotate(45deg)}
+.trace-list{height:208px;overflow:auto;padding:0 16px 8px;scrollbar-color:#1B2B54 #0B1530;scrollbar-width:thin}
+.trace-list table{width:100%;min-width:660px;border-collapse:collapse;color:#B6C8DF;font:11px 'JetBrains Mono',monospace}
+.trace-list th{position:sticky;top:0;z-index:1;padding:8px 10px;border-bottom:1px solid rgba(111,195,236,.14);background:#0B1530;color:#8A9AB2;font:600 10px Sora,sans-serif;letter-spacing:.02em;text-align:left;white-space:nowrap}
+.trace-list td{padding:6px 10px;border-bottom:1px solid rgba(111,195,236,.06);white-space:nowrap}
+.trace-list tbody tr:hover td{background:rgba(46,155,218,.06);color:#FFFFFF}
+.trace-list .num{text-align:right}
+.trace-list .id{color:#8A9AB2}
+.trace-list .pay-won{color:#2FC28A}.trace-list .pay-lost{color:#5E6E88}
+.trace-badge{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border-radius:999px;font:600 10px Sora,sans-serif;white-space:nowrap}
+.trace-badge::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}
+.trace-badge[data-tone="wait"]{background:rgba(138,154,178,.12);color:#A9B6CB}
+.trace-badge[data-tone="live"]{background:rgba(46,155,218,.14);color:#6FC3EC}
+.trace-badge[data-tone="won"]{background:rgba(47,194,138,.12);color:#2FC28A}
+.trace-badge[data-tone="lost"]{background:rgba(240,86,107,.12);color:#F58A9A}
+.trace-empty{margin:0;padding:16px 4px;color:#8A9AB2;font-size:12px}
+
+@media(max-width:700px){
+  .trace-result{top:136px;left:8px;right:8px;max-width:none;padding:11px 14px;gap:10px}
+  .trace-result-icon{flex-basis:28px;height:28px;font-size:19px}
+  .trace-result-title{font-size:15px;margin-bottom:3px}
+  .trace-result-return,.trace-result-loss{font-size:11px}
+  .trace-board{min-height:360px}
+  .trace-plot-scroll{bottom:58px}
+  .trace-market{left:8px;top:8px;width:204px;padding:10px 11px 8px}
+  .trace-price{font-size:19px}
+  .trace-info{font-size:8px}
+  .trace-stake{left:8px;bottom:75px;width:188px;padding:11px}
+  .trace-balance-row{gap:4px;margin-bottom:11px}
+  .trace-balance{font-size:11px}
+  .trace-input{padding:6px 8px}
+  .trace-input input{font-size:18px}
+  .trace-presets{gap:4px;margin-top:6px}
+  .trace-presets button{height:26px}
+  .trace-stake-foot{margin-top:10px}
+  .trace-explain,.trace-help summary{font-size:9px}
+  .trace-quote{bottom:29px;left:8px;max-width:calc(100% - 16px);padding:3px 0;background:#0B1530;font-size:9px;line-height:1.4}
+  .trace-status{bottom:5px;left:8px;max-width:calc(100% - 16px);padding:2px 0;background:#0B1530;line-height:1.3}
+  .trace-drawerbar{flex-wrap:wrap;gap:0 8px;padding:0 8px}
+  .trace .trace-tabs button{min-height:38px;padding:0 8px}
+  .trace-summary{order:3;justify-content:flex-start;width:100%;margin:0 0 6px;gap:2px 12px}
+  .trace .trace-toggle{margin-left:auto}
+  .trace-list{height:150px;padding:0 8px 6px}
+}
+
+@media(prefers-reduced-motion:reduce){.trace .trace-cell::before{transition:none}}

@@ -1,0 +1,41 @@
+{
+  "name": "tape-pool-app",
+  "private": true,
+  "description": "TapePool web app: a static single page that reads the deployed contracts and signs through the user's own wallet (docs/SPEC-PHASE5-APP.md).",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:single": "node scripts/build-single.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:cn": "node scripts/cn-extract.mjs && node C:/Users/Pro/.claude/skills/tapepool-content-cn/scripts/check-cn.js .cache/cn-strings.txt --mode web",
+    "check:size": "node scripts/check-size.mjs",
+    "verify": "npm run typecheck && npm run typecheck:e2e && npm test && npm run build && npm run build:single && npm run check:cn && npm run check:size",
+    "headers": "node scripts/headers.mjs",
+    "gen:abi": "node scripts/gen-abi.mjs",
+    "gen:vectors": "node scripts/gen-vectors.mjs",
+    "e2e": "playwright test",
+    "smoke:mainnet": "playwright test -c playwright.smoke.config.ts",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
+    "deweb:plan": "node scripts/deweb.mjs plan",
+    "deweb:verify": "node scripts/deweb.mjs verify",
+    "deweb:rehearse": "node scripts/deweb.mjs rehearse"
+  },
+  "dependencies": {
+    "@ascii-reveal/core": "0.1.1",
+    "viem": "2.57.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.5",
+    "happy-dom": "20.14.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  }
+}

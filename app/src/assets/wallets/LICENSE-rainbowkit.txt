@@ -1,0 +1,33 @@
+Wallet logos and the two "What is a wallet?" illustrations in this folder come from the
+@rainbow-me/rainbowkit npm package, version 2.2.11 (MIT licence, text below), taken from its
+bundled dist files:
+
+  metamask.svg      dist/metaMaskWallet-EI6MED72.js   (src/wallets/walletConnectors/metaMaskWallet/metaMaskWallet.svg)
+  rabby.svg         dist/rabbyWallet-GFVPHCTK.js      (src/wallets/walletConnectors/rabbyWallet/rabbyWallet.svg)
+  binance.svg       dist/binanceWallet-RCEFB436.js    (src/wallets/walletConnectors/binanceWallet/binanceWallet.svg)
+  trust.svg         dist/trustWallet-42DZQQWY.js      (src/wallets/walletConnectors/trustWallet/trustWallet.svg)
+  okx.svg           dist/okxWallet-QOP2OIPE.js        (src/wallets/walletConnectors/okxWallet/okxWallet.svg)
+  phantom.svg       dist/phantomWallet-5SZPLGFE.js    (src/wallets/walletConnectors/phantomWallet/phantomWallet.svg)
+  about-home.svg    dist/assets-Q6ZU7ZJ5.js           (src/components/Icons/assets.svg)
+  about-login.svg   dist/login-UP3DZBGS.js            (src/components/Icons/login.svg)
+
+Each file is the SVG that the package embeds as a data URI, decoded to a plain file. The only changes
+are to make them smaller: the numbers in the path data are rounded (three decimals for the logos, two for
+about-home.svg, one for about-login.svg) and re-written with commas as separators, the same-coloured pixel
+squares of about-home.svg are joined into one path per colour, and binance.svg and phantom.svg gained a viewBox so that they
+scale. The files hold no script, no event handler, no external reference and no embedded image
+(test/walletAssets.test.ts checks every file in this folder).
+
+The wallet names and logos belong to their owners. They are shown only to identify the wallet.
+
+----------------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2024 Rainbow
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

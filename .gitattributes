@@ -1,0 +1,3 @@
+# Screen artifacts and fixtures are hashed byte for byte: never convert their line endings.
+screen/artifacts/** -text
+screen/test/fixtures/** -text

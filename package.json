@@ -1,0 +1,10 @@
+{
+  "name": "tape-pool-contracts",
+  "private": true,
+  "description": "Solidity dependencies resolved through npm (LayerZero OApp). Foundry remaps them from node_modules.",
+  "license": "MIT",
+  "dependencies": {
+    "@layerzerolabs/lz-evm-protocol-v2": "3.0.168",
+    "@layerzerolabs/oapp-evm": "0.4.1"
+  }
+}

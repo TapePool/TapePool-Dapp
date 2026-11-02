@@ -1,0 +1,25 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+# Local anvil rehearsals and the keeper integration test (chain ids 56/196 but never real)
+/broadcast/AnvilStack.s.sol/
+
+# Dotenv files (RPC keys, never private keys in this repo)
+.env
+.env.*
+
+# Large, regenerable research caches (rebuild with research/scripts/snapshot.sh)
+research/data/pod-logs-raw.json
+research/data/pod-events.json
+research/data/raw/
+
+# npm-resolved Solidity dependencies (install with: npm ci --legacy-peer-deps --ignore-scripts)
+node_modules/
+
+# Raw run files of security audits (unverified claims, addresses): template rule 7
+docs/security-audits/*/runs/

@@ -1,0 +1,58 @@
+name: CI
+
+permissions: {}
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+  # Fork tests run against a pinned X Layer block so results do not drift with the chain.
+  FORK_BLOCK: "73558380"
+  # Archive BSC endpoint for the rig data feed tests (T6-T8). Optional: without the secret
+  # (forks, or before it is added) those suites skip and everything else still runs.
+  BSC_RPC: ${{ secrets.BSC_RPC }}
+
+jobs:
+  check:
+    name: Foundry project
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1 # same as local, so forge fmt agrees
+          cache: false # the fork-state cache below is keyed by FORK_BLOCK instead
+
+      - name: Show Forge version
+        run: forge --version
+
+      # LayerZero OApp sources come from npm at pinned versions (package-lock.json); no install scripts.
+      - name: Install npm Solidity dependencies
+        run: npm ci --legacy-peer-deps --ignore-scripts --no-audit --no-fund
+
+      - name: Cache fork state
+        uses: actions/cache@v4
+        with:
+          path: ~/.foundry/cache/rpc
+          key: rpc-${{ env.FORK_BLOCK }}-${{ hashFiles('test/**/*.sol') }}
+          restore-keys: rpc-${{ env.FORK_BLOCK }}-
+
+      - name: Run Forge fmt
+        run: forge fmt --check
+
+      - name: Run Forge build
+        run: forge build --sizes
+
+      # T0 also forks the live X Layer tip as a network smoke test, so it always hits the public RPC.
+      - name: Run Forge tests
+        run: forge test -vv

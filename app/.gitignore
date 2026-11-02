@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-fork/
+.cache/
+# written by the fork e2e setup (test/e2e/stack.ts) and read by the fork build
+test/fork-addresses.json
+# the single-file build, and anything `deweb.mjs plan --out` writes (calldata is large and is not source)
+dist-single/
+deweb-out/

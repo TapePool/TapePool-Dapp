@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "allowImportingTsExtensions": false
+  },
+  "include": [
+    "test/e2e",
+    "test/smoke",
+    "playwright.config.ts",
+    "playwright.smoke.config.ts",
+    "test/scripts-lib.d.ts"
+  ],
+  "exclude": []
+}

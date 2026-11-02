@@ -1,0 +1,97 @@
+/* Classes that replace the inline styles of the prototype. The CSP allows no `style` attribute, so nothing here is set in markup.
+   Widths and positions that depend on data come from `--pct`, which the app writes through the CSSOM from `data-pct`. */
+
+/* text */
+.c-w{color:#FFFFFF!important}
+.c-soft{color:#C9D3E6!important}
+.c-pos{color:#2FC28A!important}
+.c-warn{color:#F2B84B!important}
+.c-neg{color:#F58A9A!important}
+.c-blue{color:#6FC3EC!important}
+.t11{font-size:11px}
+.t12{font-size:12px}
+.t15{font-size:15px}
+.t18{font-size:18px}
+.fw4{font-weight:400}
+.fw6{font-weight:600}
+.m0{margin:0}
+.nw{white-space:nowrap}
+.w100{width:100%}
+.ta-r{text-align:right}
+.ta-c{text-align:center}
+.nodeco{text-decoration:none}
+.pt0{padding-top:0}
+.ml-a{margin-left:auto}
+.pointer{cursor:pointer}
+.bt{border-top:1px solid rgba(111,195,236,.1)}
+
+/* layout */
+.col{display:flex;flex-direction:column}
+.g6{gap:6px}
+.g10{gap:10px}
+.g12{gap:12px}
+.g14{gap:14px}
+.row-wrap{display:flex;flex-wrap:wrap}
+.g8-12{gap:8px 12px}
+.g8-14{gap:8px 14px}
+.ai-c{align-items:center}
+.row-sb{display:flex;justify-content:space-between}
+.inl10{display:inline-flex;align-items:center;gap:10px}
+.inl6{display:inline-flex;align-items:center;gap:6px}
+.head-id{display:flex;align-items:center;gap:14px}
+.empty-c{align-items:center;text-align:center;padding:28px 20px}
+.seg-full{width:100%}
+.seg-half{flex:1 1 0;justify-content:center;padding:0 14px}
+
+/* images and the header */
+.logo-img{display:block;height:30px;width:auto}
+.i-net{display:block;width:26px;height:26px;border-radius:7px}
+.btn-h40{height:40px}
+.v2-hd .netw.pointer{padding:0 14px}
+.i-r9{border-radius:9px}
+.i-tp{border-radius:9px;background:#1B2B54}
+.i-dim{opacity:.55}
+.i-dim5{opacity:.5}
+.i-44{width:44px;height:44px;border-radius:12px;display:block}
+.i-18{width:18px;height:18px;border-radius:5px;display:block}
+.ring-30{width:30px;height:30px}
+.ring-34{width:34px;height:34px}
+.ring-56{width:56px;height:56px}
+.dot-g{background:#2FC28A}
+.dot-y{background:#F2B84B}
+.dot-r{background:#F0566B}
+.dot-n{background:#8A9AB2}
+
+/* bars and the loan timeline */
+.bar>span,.tl>span{width:var(--pct,0%)}
+.bar-b{display:block}
+.bar-72{width:72px}
+.bar-line{display:flex;align-items:center;gap:8px;margin-top:4px}
+.tl-box{padding:14px 16px;border-radius:6px;background:rgba(11,21,48,.6);border:1px solid rgba(111,195,236,.14)}
+.tl-s{left:-2px;background:#2E9BDA}
+.tl-now{left:calc(var(--pct,0%) - 7px);background:#FFFFFF;box-shadow:0 0 0 4px rgba(46,155,218,.3)}
+.tl-e{right:-2px;border:2px solid #8A9AB2;background:#0E1D3D}
+.tl-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+
+/* the loan card */
+.loan-b{flex:1 1 auto;display:flex;flex-direction:column;gap:16px}
+.loan-top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.debt-n{font-size:34px;line-height:1.15;letter-spacing:-.02em}
+.tbl-box{border:1px solid rgba(111,195,236,.14);border-radius:6px}
+.loan-grid{margin:auto 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;border:1px solid rgba(111,195,236,.14);border-radius:6px;overflow:hidden;background:rgba(111,195,236,.14)}
+.loan-grid>div{padding:10px 14px;background:#0E1D3D}
+.loan-grid dd{margin:2px 0 0}
+
+/* lists inside cards */
+.ol-elig{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;color:#C9D3E6;font-size:13px}
+.ul-box{margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+
+/* raw error text under "Details" */
+.det pre{margin:6px 0 0;white-space:pre-wrap;word-break:break-all;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:#8A9AB2}
+/* the loan's repayment bar (SPEC-PHASE5-PROGRESS): repaid, then mined toward the debt, and the keeper's marker */
+.bar2{display:flex;position:relative;overflow:visible}
+.bar2>span{flex:none;border-radius:0}
+.bar2>.seg-r{border-radius:999px 0 0 999px}
+.bar2>.seg-m{background:repeating-linear-gradient(135deg,#2E9BDA 0 3px,rgba(46,155,218,.35) 3px 6px)}
+.bar2>.bar-mk{position:absolute;top:-4px;bottom:-4px;width:2px;left:var(--pct,0%);background:rgba(255,255,255,.8);border-radius:1px}
+.bar2-t{margin-top:6px}

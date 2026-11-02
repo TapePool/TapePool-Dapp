@@ -1,0 +1,33 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.24"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "forge-std/=lib/forge-std/src/",
+    "@layerzerolabs/oapp-evm/=node_modules/@layerzerolabs/oapp-evm/",
+    "@layerzerolabs/lz-evm-protocol-v2/=node_modules/@layerzerolabs/lz-evm-protocol-v2/",
+]
+# Spike runs ONLY against a local fork. Nothing here broadcasts.
+fs_permissions = [{ access = "read", path = "./" }]
+
+# Stateful invariant campaigns (test/invariant). A deeper pass: FOUNDRY_INVARIANT_RUNS / _DEPTH.
+[invariant]
+runs = 64
+depth = 200
+fail_on_revert = true
+
+# The 2026-11-01 review reproductions are frozen byte for byte (SPEC-REDEPLOY-3 R3-08 item 1). One of
+# them has a line over the formatter's width, so `forge fmt` skips that file instead of rewriting it.
+[fmt]
+ignore = ["test/audit/2026-11-01-redeploy-review/L01StaleImpairedReport.t.sol"]
+
+[rpc_endpoints]
+xlayer = "https://rpc.xlayer.tech" # chain 196
+bsc = "${BSC_RPC}"                 # chain 56, archive endpoint from .env (never committed)
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
