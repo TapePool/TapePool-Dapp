@@ -91,42 +91,33 @@ the pool shows whether new borrows are open.
 ```mermaid
 flowchart LR
   subgraph users["Who uses it"]
-    lender["Lender"]
-    miner["Miner<br/>holds a RIG voucher"]
+    direction TB
+    lender["Lender<br/>deposit, withdraw"]
+    miner["Miner<br/>borrow, repay, release"]
   end
 
-  app["app.tapepool.io<br/>static web app"]
+  app["app.tapepool.io<br/>static web app,<br/>signs with the<br/>user's wallet"]
+
+  keeper["Keeper<br/>off-chain,<br/>every 60 s"]
+
+  subgraph bsc["BSC: TapeOut mining"]
+    direction TB
+    reporter["RigReporter"] -->|"reads base power, status"| pod["PodMining<br/>+ rig vault"]
+  end
 
   subgraph xl["X Layer"]
-    pool["TapePool<br/>BEM / tpBEM"]
-    agent["RigAgent<br/>holds the voucher"]
-    policy["CreditPolicy<br/>+ policy circuit<br/>+ RigScreen"]
-    receiver["RigFeedReceiver"]
+    direction TB
+    agent["RigAgent<br/>holds the RIG voucher"] -->|"check each advance"| policy["CreditPolicy<br/>+ policy circuit<br/>+ RigScreen"]
+    policy -->|"reads the rig report"| receiver["RigFeedReceiver"]
+    agent -->|"lend, repay"| pool["TapePool<br/>BEM / tpBEM"]
   end
 
-  keeper["Keeper<br/>off-chain"]
-
-  subgraph bsc["BSC"]
-    reporter["RigReporter"]
-    pod["PodMining<br/>+ rig vault"]
-  end
-
-  lender -->|"deposit, withdraw"| app
-  miner -->|"borrow, repay"| app
-  app -->|"supply"| pool
-  app -->|"borrow, repay, release"| agent
-  app -->|"stats, push requests"| keeper
-
-  agent -->|"check"| policy
-  policy -->|"rig report"| receiver
-  agent -->|"lend, repay"| pool
-
-  keeper -->|"push reports"| reporter
-  reporter -->|"reads"| pod
-  reporter -->|"LayerZero"| receiver
-  keeper -->|"harvest"| pod
-  pod -->|"mined BEM via bridge"| agent
-  keeper -->|"sweep, flag, seize"| agent
+  users --> app
+  app -->|"supply, borrow,<br/>repay, release"| xl
+  app -->|"stats,<br/>push requests"| keeper
+  keeper -->|"harvest,<br/>push reports"| bsc
+  bsc -->|"rig reports over LayerZero,<br/>mined BEM via the bridge<br/>to the agent"| xl
+  keeper -->|"sweep, flag, seize"| xl
 ```
 
 How a loan runs:
