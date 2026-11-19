@@ -63,7 +63,7 @@ export function poolPage(c: Ctx): Html {
       [t('Changing it', '变更'), t('7-day queue, borrows pause meanwhile', '排队 7 天，期间暂停借款')],
     ])}
     <p class="mut m0 t12">${t('Inputs: the term, debt against expected output, fresh rig data, no impairment, an allowed processor, age of at least 3 days and a screen pass. Any unexpected answer means no.', '输入：期限、债务占预期产出、矿机数据新鲜、未受损、处理器允许、上线至少 3 天、筛查通过。任何异常结果都按拒绝处理。')}</p>
-    <div><a class="btn btn-s" href="${explorerAddress(ck.circuits)}" target="_blank" rel="noopener noreferrer">${t('Verify on the explorer', '在区块浏览器中验证')}</a></div></div></section>`;
+    </div></section>`;
 
   const k = pool.contracts;
   const contractsCard = html`<section class="v2-card" aria-labelledby="p4"><div class="v2-card-h"><h2 id="p4"><span class="uid" aria-hidden="true">P4</span>${t('Contracts and admin', '合约与管理权限')}</h2></div><div class="v2-card-b col g12">
