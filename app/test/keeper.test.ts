@@ -31,6 +31,17 @@ describe('parsePosition', () => {
     expect(parsePosition({ netDeposited: '0', transferred: false, firstDepositAt: null, indexedTo: 5, indexedToTime: null })).not.toBeNull();
   });
 
+  it('decodes exact BEM history and keeps balances usable with an older or malformed history response', () => {
+    const row = { kind: 'borrow', hash: '0x' + '1'.repeat(64), amount: '1060000', time: 1_792_000_000 };
+    expect(parsePosition({ ...pos, transactions: [row] })?.transactions).toEqual([{ ...row, amount: 1060000n }]);
+    expect(parsePosition({ ...pos, transactions: [] })?.transactions).toEqual([]);
+    for (const transactions of [undefined, [{ ...row, hash: 'bad' }], [{ ...row, amount: '-1' }]]) {
+      const result = parsePosition({ ...pos, transactions });
+      expect(result?.netDeposited).toBe(500_000_000n);
+      expect(result?.transactions).toBeUndefined();
+    }
+  });
+
   it('refuses anything else', () => {
     for (const bad of [null, {}, { ...pos, netDeposited: 5 }, { ...pos, netDeposited: '1.5' }, { ...pos, transferred: 'no' }, { ...pos, indexedTo: '5' }, { ...pos, firstDepositAt: '1' }]) {
       expect(parsePosition(bad), JSON.stringify(bad)).toBeNull();

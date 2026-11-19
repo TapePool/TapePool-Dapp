@@ -5,6 +5,7 @@ import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
 import { PRICE_ORIGIN, injectMeta, originOf, policy, serialize } from './scripts/lib/csp.mjs';
 import { readConfig } from './src/config';
+import { historyRpc } from './scripts/history-rpc';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,7 +42,7 @@ const single = process.env.TP_SINGLE === '1';
 
 export default defineConfig({
   base: './',
-  plugins: [securityMeta()],
+  plugins: [securityMeta(), historyRpc(here)],
   define: { __TP_FORK__: JSON.stringify(fork) },
   build: {
     target: 'es2022',

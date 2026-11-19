@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+declare const __TP_HISTORY_RPC__: boolean;
 
 interface ImportMetaEnv {
   /** `mainnet` (default). The fork address book arrives with the e2e setup (B4). */

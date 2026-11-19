@@ -62,6 +62,22 @@ it('keeps the latest chosen-amount quote when an earlier request for the same am
   }
 });
 
+it('filters the dashboard history and links to the transaction on X Layer', () => {
+  const { app } = mount('connected', '#/app');
+  current = app;
+  expect(document.title).toBe('TapePool | Dashboard');
+  expect(document.querySelectorAll('.tx-row')).toHaveLength(3);
+  const filter = document.querySelector<HTMLSelectElement>('#transaction-kind')!;
+  filter.value = 'repay';
+  filter.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(document.querySelectorAll('.tx-row')).toHaveLength(1);
+  expect(document.querySelector('.tx-row')?.textContent).toContain('0.0264 BEM');
+  expect(document.querySelector('.tx-link')?.getAttribute('href')).toBe('https://www.oklink.com/xlayer/tx/0x' + 'a'.repeat(64));
+  filter.value = 'withdraw';
+  filter.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(document.querySelector('.tx-empty')?.textContent).toBe('No matching transactions.');
+});
+
 describe('the DOM morph', () => {
   it('patches in place, so a node keeps its identity and a typed value survives', () => {
     const host = document.createElement('div');
@@ -145,11 +161,11 @@ describe('the app shell', () => {
   it('opens the page of the hash and switches language on a click', () => {
     const { app } = mount('connected', '#/app/markets');
     current = app;
-    expect(document.title).toBe('TapePool · Markets');
+    expect(document.title).toBe('TapePool | Markets');
     expect(document.documentElement.lang).toBe('en');
     (document.querySelector('[data-a="lang"][data-v="cn"]') as HTMLElement).click();
     expect(document.documentElement.lang).toBe('zh-CN');
-    expect(document.title).toBe('TapePool · 市场');
+    expect(document.title).toBe('TapePool | 市场');
     expect(document.querySelector('h1')?.textContent).toBe('市场');
   });
 

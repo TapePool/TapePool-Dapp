@@ -8,7 +8,7 @@ import type { Address, PrincipalQuote, Sec, Snapshot, TermIndex } from './model'
 
 export interface DataSource {
   /** The current read. With `view` set, the read is for that address and the wallet is read-only. */
-  snapshot(view: Address | null): Snapshot;
+  snapshot(view: Address | null, showTransactions?: boolean): Snapshot;
   quoteFor?(agent: Address, term: TermIndex, principal: bigint): Promise<PrincipalQuote | null>;
   /** X Layer time in seconds, advancing between reads. Never the browser clock alone. */
   now(): Sec;

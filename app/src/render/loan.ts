@@ -232,9 +232,9 @@ export function loanActions(c: Ctx, L: LoanView): Html {
   if (isOpen(L)) {
     body = html`<div class="act">${act(c, { a: 'repay', v: lead, size: 'lg', needs: ['loans'] }, t('Repay with BEM', '用 BEM 还款'))}<small>${t('Any time. Repaying early does not reduce the flat fee.', '随时可还。提前还款不会减少固定费用。')}</small></div>
       <div class="act">${c.readOnly === 'frame' ? EMPTY : html`<button type="button" class="btn btn-x btn-lg" disabled>${t('Release voucher', '取回凭证')}</button>`}<small>${t('After the debt reaches 0.', '债务清零后可用。')}</small></div>
-      ${L.agentBem > 0n ? html`<div class="act">${act(c, { a: 'sweep', v: lead, kind: 's', needs: ['loans'] }, html`${t('Apply harvested BEM now', '立即归集已领取的 BEM')} <span class="mono c-blue">${bem4(L.agentBem)}</span>`)}<small>${t('Optional. The keeper does this (sweep) every 10 minutes, and anyone may call it.', '可选操作。keeper 每 10 分钟自动执行归集（sweep），任何人都可以调用。')}</small></div>` : EMPTY}`;
+      ${L.agentBem > 0n ? html`<div class="act">${act(c, { a: 'sweep', v: lead, kind: 's', needs: ['loans'] }, html`${t('Apply harvested BEM now', '立即归集已领取的 BEM')} <span class="mono c-blue">${bem4(L.agentBem)}</span>`)}<small>${t('Anyone can sweep. The keeper checks every 10 minutes.', '任何人都可归集，keeper 每 10 分钟检查一次。')}</small></div>` : EMPTY}`;
   } else if (L.phase === 'cleared') {
-    body = html`<div class="act">${act(c, { a: 'release', v: lead, size: 'lg', needs: ['loans'] }, t('Release voucher', '取回凭证'))}<small>${t('Sends the voucher to your wallet. A harvest sent while the agent still holds it pays the agent; claim that later with Claim late BEM.', '将凭证转回您的钱包。代理持有凭证期间发起的领取收益仍会进入代理，之后可通过“领取迟到的 BEM”取回。')}</small></div>`;
+    body = html`<div class="act">${act(c, { a: 'release', v: lead, size: 'lg', needs: ['loans'] }, t('Release voucher', '取回凭证'))}<small>${t('Returns the voucher to your wallet. Use Claim late BEM for harvests still on the way.', '凭证将转回您的钱包。尚在途中的收益可稍后通过“领取迟到的 BEM”取回。')}</small></div>`;
   } else {
     body = html`<p class="mut m0">${t('The loan is closed. Nothing is left to repay.', '贷款已关闭，无需再还款。')}</p>`;
   }

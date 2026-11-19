@@ -89,7 +89,7 @@ the pool shows whether new borrows are open.
 ## Architecture
 
 ```mermaid
-flowchart TB
+flowchart LR
   subgraph users["Who uses it"]
     lender["Lender<br/>browser wallet"]
     miner["Miner<br/>browser wallet, holds a RIG voucher"]

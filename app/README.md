@@ -42,6 +42,12 @@ Build-time settings, read by Vite from the environment (names only; none of them
 | `VITE_KEEPER_URL` | base URL of the keeper's read-only routes and the push route. `https`, or `http` on a local host; anything else is ignored. Unset: the app calls no keeper. It is **baked into the build**, so changing it means a new build (and, on DeWEB, an update transaction set). Its origin is added to the policy's `connect-src` automatically. |
 | `VITE_TAPELENS_ADDRESS` | a deployed `TapeLens`. Unset: the app places TapeLens's runtime code at a dummy address for its `eth_call` quotes (SPEC O-1). |
 
+On localhost, the dev server uses the repository's server-side `XLAYER_RPC` (QuickNode) for Dashboard history.
+It serves only pool event and block-header reads. The private RPC URL stays on the server. Static builds use
+the keeper's position history when available and otherwise read X Layer logs in 100-block pages.
+The browser caches confirmed rows per pool and wallet. The compact index in `src/chain/activityBlocks.json`
+lists historical blocks to look up. Newer blocks are always checked independently.
+
 The e2e tests need one more name in the environment, never bundled and never printed: `BSC_RPC`, an archive BSC endpoint
 (it lives in the git-ignored `../.env`). The mainnet app itself uses only the two public RPCs
 `https://rpc.xlayer.tech` and `https://bsc-dataseed.bnbchain.org`. A keyed RPC URL must never be put in the app;

@@ -11,7 +11,7 @@ import type { Clients } from "./chains.js";
 import { log } from "./log.js";
 import { KEEP_SNAPSHOTS, ONE_SHARE, SECONDS_PER_DAY, apy7d, dayLabel, dayOf, emptyStats } from "./logic/apy.js";
 import { firstBlockAtOrAfter } from "./logic/blockSearch.js";
-import { applyEvents, blocksNeedingTime, decodeLedgerLog, emptyIndex, positionBody } from "./logic/ledger.js";
+import { applyEvents, decodeLedgerLog, emptyIndex, positionBody } from "./logic/ledger.js";
 import type { KeeperState } from "./state.js";
 
 /** X Layer `eth_getLogs` limit. */
@@ -228,14 +228,14 @@ export class PublicData implements PublicDataApi {
     const index = this.state.index;
     const logs = await x.getLogs({ address: this.pool, events: ledgerEvents, fromBlock: from, toBlock: to });
     const events = logs.map((l) => decodeLedgerLog(l));
-    // logs carry no timestamp: only the block of an address's first deposit is read
+    // Share one timestamp read across all activity in the same block.
     const times = new Map<bigint, number>();
-    await Promise.all(
-      blocksNeedingTime(index, events).map(async (b) => {
-        times.set(b, Number((await x.getBlock({ blockNumber: b })).timestamp));
-      }),
-    );
-    applyEvents(index, events, (b) => times.get(b) ?? 0);
+    for (const e of events) {
+      if (e.kind !== "transfer" && !times.has(e.block)) {
+        times.set(e.block, Number((await x.getBlock({ blockNumber: e.block })).timestamp));
+      }
+    }
+    applyEvents(index, events, (b) => times.get(b)!);
     index.cursor = (to + 1n).toString();
   }
 }

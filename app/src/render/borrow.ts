@@ -53,7 +53,7 @@ export function rigInfo(c: Ctx, r: RigView): Html {
     <div><dt>${t('Age', '上线时间')}</dt><dd>${t(`${days} days`, `${days} 天`)}</dd></div>
     <div><dt>${t('Screen pass', '筛查')}</dt><dd>${screenChip(c, r)}</dd></div>
     <div><dt>${t('Not harvested on BSC', 'BSC 上待领取')}</dt><dd>${r.mined === null ? '—' : html`<span class="nw"><span class="mono">${bem4(r.mined)}</span> <span class="u">BEM</span></span>`}</dd></div></dl>
-    <span class="mut t12">${t('This rig gets its own Rig Agent, so a problem with one rig never puts your other rigs at risk.', '这台矿机使用独立的“矿机代理”（Rig Agent），一台矿机出问题不会牵连其他矿机。')}</span></div></section>`;
+    <span class="mut t12">${t('A separate agent keeps your other rigs outside this loan.', '单独使用一个矿机代理，其他矿机不参与这笔贷款。')}</span></div></section>`;
 }
 
 function queuedLabel(k: ParamKey): string {
@@ -142,7 +142,7 @@ function amtCard(c: Ctx, b: BorrowView): Html {
           ${lim.roomLimited ? html`<p class="note m0">${t("Your max is set by the pool's room for you, not by your rig.", '您的上限受资金池可借额度限制，而非矿机产出。')}</p>` : EMPTY}`
       : cl('n', t('Nothing to borrow for this choice right now.', '当前选择暂无可借额度。'))
   }`;
-  return html`<section class="v2-card" aria-labelledby="a2"><div class="v2-card-h"><h2 id="a2"><span class="uid" aria-hidden="true">2</span>${t('Term and amount', '期限和金额')}</h2><span class="meta">${t('The term sets the maturity', '期限决定到期时间')}</span></div><div class="v2-card-b col g14">${body}${c.snap.wallet.binding ? html`<p class="note m0">${t('Pool limit', '资金池上限')}: ${limitText(c.snap.wallet.binding, b.settling)}</p>` : EMPTY}</div></section>`;
+  return html`<section class="v2-card" aria-labelledby="a2"><div class="v2-card-h"><h2 id="a2"><span class="uid" aria-hidden="true">2</span>${t('Term and amount', '期限和金额')}</h2></div><div class="v2-card-b col g14">${body}${c.snap.wallet.binding ? html`<p class="note m0">${t('Pool limit', '资金池上限')}: ${limitText(c.snap.wallet.binding, b.settling)}</p>` : EMPTY}</div></section>`;
 }
 
 function ruleChip(b: BorrowView): Html {
@@ -197,7 +197,7 @@ function summary(c: Ctx, b: BorrowView): Html {
       ${reviewRow(b)}
     </dl>
     <div class="col g6"><div class="row-sb t12"><span class="mut">${t('Debt vs expected output', '债务占预期产出')}</span><span><span class="mono">${shown > 0n ? pctOf(a.debt, shown, 1) : '0.0%'}</span> <span class="mut">${t(`of max ${pctBps(p.maxDebtBps[b.term])}`, `上限 ${pctBps(p.maxDebtBps[b.term])}`)}</span></span></div>${bar(debtBarPct(a.debt, shown, p.maxDebtBps[b.term]))}</div>
-    <p class="mut m0 t12"><b class="c-soft fw6">${t('How it is repaid: ', '还款方式：')}</b>${t(`the keeper harvests your rig as soon as its mined BEM, after the bridge fee, covers the debt (checked every 10 minutes), otherwise ${win(maturity - HOUR, maturity)}. The mined BEM pays the debt, fee first. Harvest earlier on tapeout.net to repay sooner (you pay the BNB gas).${reviewSentence(b)}`, `一旦矿机已挖出的 BEM（扣除跨链费后）足以还清债务，keeper 即为您的矿机领取收益（每 10 分钟检查一次），否则在 ${win(maturity - HOUR, maturity)} 领取。挖出的 BEM 先付费用、再还本金。也可以提前在 tapeout.net 领取以更早还款（由您支付 BNB gas）。${reviewSentence(b)}`)}</p>
+    <p class="mut m0 t12"><b class="c-soft fw6">${t('How it is repaid: ', '还款方式：')}</b>${t(`the keeper checks every 10 minutes and harvests when net output covers the debt, or during ${win(maturity - HOUR, maturity)}. Harvests pay fees first. You can harvest early on tapeout.net with BNB for gas.${reviewSentence(b)}`, `keeper 每 10 分钟检查一次。扣除跨链费后的产出足以还清债务时即领取，否则在 ${win(maturity - HOUR, maturity)} 领取。收益先付费用，再还本金。您也可在 tapeout.net 提前领取，需用 BNB 支付网络费。${reviewSentence(b)}`)}</p>
     ${
       hasOps
         ? cl(
@@ -238,7 +238,7 @@ function steps(c: Ctx, b: BorrowView): Html {
       ? b.reused
         ? `${t(`Using your empty agent ${agentAddr}.`, `使用您空闲的代理 ${agentAddr}。`)}${waiting}`
         : t(`Agent ${agentAddr} created.`, `已创建代理 ${agentAddr}。`)
-      : t('Your own contract. It holds the voucher while the loan is open and gives it back when the debt is 0. 1 transaction.', '您专属的合约：贷款期间持有凭证，债务清零后归还。1 笔交易。'),
+      : t('Create your Rig Agent in one transaction. It holds the voucher until repayment.', '一笔交易即可创建矿机代理。贷款还清前，凭证由代理保管。'),
     b.agentDone
       ? b.moved || ui.agent === null
         ? EMPTY

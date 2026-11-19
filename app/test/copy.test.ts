@@ -20,9 +20,12 @@ describe('settled copy decisions', () => {
     }
   });
 
-  it('S-3: the risk line is the plain one', () => {
-    must(make('pool-page', { lang: 'en' }).text, 'Smart contracts carry risk. You can lose funds.', 'risk');
-    must(make('pool-page', { lang: 'cn' }).text, '智能合约存在风险，您可能损失资金。', 'risk');
+  it('omits the generic funds warning from deposit screens in both languages', () => {
+    for (const lang of ['en', 'cn'] as const) {
+      for (const hash of ['#/app', '#/app/markets/bem', '#/app/supply']) {
+        mustNot(make('connected', { hash, lang }).text, /lose funds|loss of funds|损失资金/i, hash);
+      }
+    }
   });
 
   it('S-2: every FabX and FAB placeholder stays, with its Coming soon tag', () => {
@@ -37,7 +40,7 @@ describe('settled copy decisions', () => {
       // the footer names FabX on every page
       must(make('connected', { hash: '#/app/markets/bem', lang }).text, 'FabX', 'footer');
     }
-    must(make('connected', { hash: '#/app/markets', lang: 'cn' }).text, 'FabX 矿机的 FAB 资金池正在计划中，尚未上线，目前无法存入或借款。', 'tooltip');
+    must(make('connected', { hash: '#/app/markets', lang: 'cn' }).html, 'FAB 资金池计划支持 FabX 矿机。', 'tooltip');
   });
 
   it('S-6: the Alerts card keeps its button, off, with a Coming soon tag', () => {
@@ -69,7 +72,7 @@ describe('settled copy decisions', () => {
 
   it('§17: the corrected sentences are in', () => {
     const pool = make('pool-page').text;
-    must(pool, 'The owner can lower caps at once. Every other change, fees included, waits 48 h in a public queue, within hard limits in the code. No one can move pool funds or vouchers.', 'admin line');
+    must(pool, 'The owner can lower caps immediately. Fee changes and cap increases wait 48 hours. Admin functions cannot transfer funds or vouchers.', 'admin line');
     const swap = make('swap-queued').text;
     must(swap, 'stay paused until the owner resumes them after the switch', 'swap banner');
     for (const n of ['flow-idle', 'flow-fresh', 'flow-expired', 'flow-waiting']) mustNot(make(n).text, /refreshes left|No free refreshes/i, n);

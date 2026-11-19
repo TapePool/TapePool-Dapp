@@ -196,9 +196,11 @@ export const beaconAbi = parseAbi(["function implementation() view returns (addr
  */
 export const shareAbi = parseAbi(["function convertToAssets(uint256 shares) view returns (uint256)"]);
 
-/** The ERC-4626 and ERC-20 events of the pool (tpBEM is the pool contract itself). */
+/** Events for the position and transaction index (tpBEM is the pool contract itself). */
 export const ledgerEvents = parseAbi([
   "event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares)",
   "event Withdraw(address indexed sender, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)",
   "event Transfer(address indexed from, address indexed to, uint256 value)",
+  "event Lent(address indexed agent, address indexed borrower, uint256 amount)",
+  "event RepaymentReceived(address indexed agent, uint256 fee, uint256 toReserve, uint256 principal)",
 ]);

@@ -374,6 +374,11 @@ export function baseSnapshot(): Snapshot {
       contracts: CONTRACTS,
     },
     rules: { totalVerifWeight: TOTAL_VERIF_WEIGHT, emissionValidUntil: T0 + 400 * DAY },
+    transactions: { syncing: false, rows: [
+      { kind: 'repay', amount: bem(0.0264), time: T0 - 3600, hash: `0x${'a'.repeat(64)}` },
+      { kind: 'borrow', amount: bem(0.0234), time: T0 - 86400, hash: `0x${'b'.repeat(64)}` },
+      { kind: 'supply', amount: bem(5), time: T0 - 90000, hash: `0x${'c'.repeat(64)}` },
+    ] },
     position: { tpbem: 500_000_000_000_000n, value: bem(5.0435), withdrawable: bem(5.0435), maxDeposit: bem(5.735), growth: bem(0.0435) },
     keeper: { reachable: true, apy7d: '0.091900', selfPushBnb: 1_700_000_000_000_000n },
     rigs: facts.map((f) => buildRigView(f, T0)),

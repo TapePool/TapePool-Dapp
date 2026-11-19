@@ -1,4 +1,4 @@
-import type { Address, Sec } from '../model';
+import type { Address, PoolTransaction, Sec } from '../model';
 
 /**
  * The keeper's read-only routes (SPEC-PHASE5-APP §8). Two plain GETs with no custom header, so the browser sends
@@ -16,6 +16,7 @@ export interface KeeperStats {
 }
 
 export interface KeeperPosition {
+  transactions?: PoolTransaction[];
   netDeposited: bigint;
   transferred: boolean;
   firstDepositAt: Sec | null;
@@ -48,6 +49,20 @@ export function parseStats(body: unknown): KeeperStats | null {
   return { asOf, block, sharePrice: BigInt(sharePrice), apy7d };
 }
 
+export function parseTransactions(value: unknown): PoolTransaction[] | undefined {
+  if (!Array.isArray(value) || value.length > 100) return;
+  const rows: PoolTransaction[] = [];
+  for (const entry of value) {
+    if (!isObj(entry)) return;
+    const { kind, hash, time, amount } = entry;
+    if (kind !== 'supply' && kind !== 'withdraw' && kind !== 'borrow' && kind !== 'repay') return;
+    if (typeof hash !== 'string' || !/^0x[0-9a-f]{64}$/i.test(hash) || !isNat(time) || time > 253402300799) return;
+    if (typeof amount !== 'string' || !/^\d{1,78}$/.test(amount)) return;
+    rows.push({ kind, hash: hash as PoolTransaction['hash'], time, amount: BigInt(amount) });
+  }
+  return rows;
+}
+
 export function parsePosition(body: unknown): KeeperPosition | null {
   if (!isObj(body)) return null;
   const { netDeposited, transferred, firstDepositAt, indexedTo, indexedToTime } = body;
@@ -55,7 +70,7 @@ export function parsePosition(body: unknown): KeeperPosition | null {
   if (typeof transferred !== 'boolean' || !isNat(indexedTo)) return null;
   if (firstDepositAt !== null && !isNat(firstDepositAt)) return null;
   if (indexedToTime !== null && !isNat(indexedToTime)) return null;
-  return { netDeposited: BigInt(netDeposited), transferred, firstDepositAt, indexedTo, indexedToTime };
+  return { netDeposited: BigInt(netDeposited), transferred, firstDepositAt, indexedTo, indexedToTime, transactions: parseTransactions(body.transactions) };
 }
 
 /**

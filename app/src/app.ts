@@ -347,6 +347,10 @@ export function createApp(deps: AppDeps): App {
     const snap = c.snap;
     // UI-only actions
     switch (a) {
+      case 'more-transactions':
+        ui.transactionLimit += 10;
+        render();
+        return;
       case 'connect':
         if (!deps.inFrame) openPicker();
         return;
@@ -640,6 +644,15 @@ export function createApp(deps: AppDeps): App {
 
   function onChange(e: Event): void {
     const el = e.target as HTMLElement | null;
+    if (el?.id === 'transaction-kind') {
+      const kind = (el as HTMLSelectElement).value;
+      if (kind === 'all' || kind === 'supply' || kind === 'withdraw' || kind === 'borrow' || kind === 'repay') {
+        ui.transactionKind = kind;
+        ui.transactionLimit = 10;
+        render();
+      }
+      return;
+    }
     const pick = el?.getAttribute('data-pick');
     if (!el || pick === null || pick === undefined) return;
     const id = Number(pick);

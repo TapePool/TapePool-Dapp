@@ -215,7 +215,7 @@ export const FIXTURES: Record<string, FixtureDef> = {
   markets: { title: 'Markets', hash: '#/app/markets', build: connected },
   'markets-disconnected': { title: 'Markets, no wallet', hash: '#/app/markets', build: () => mapWallet(connected(), { status: 'disconnected' }) },
   'pool-page': { title: 'BEM pool page', hash: '#/app/markets/bem', build: connected },
-  'keeper-absent': { title: 'Keeper unreachable: no APY, no growth', hash: '#/app/markets/bem', build: () => ({ ...connected(), keeper: { reachable: false, apy7d: null, selfPushBnb: null }, position: { ...(connected().position as NonNullable<Snapshot['position']>), growth: null } }) },
+  'keeper-absent': { title: 'Keeper unreachable: no APY, no growth', hash: '#/app/markets/bem', build: () => ({ ...connected(), transactions: undefined, keeper: { reachable: false, apy7d: null, selfPushBnb: null }, position: { ...(connected().position as NonNullable<Snapshot['position']>), growth: null } }) },
   stale: { title: 'A read failed: old values marked stale', hash: '#/app/rigs', build: () => ({ ...connected(), stale: { pool: true, wallet: true, rigs: true, loans: true, keeper: true } }) },
 
   /* pool states */

@@ -57,7 +57,7 @@ export function poolNotice(c: Ctx): Html {
   const pool = c.snap.pool;
   switch (k) {
     case 'paused':
-      return cl('w', html`<b>${t('New borrows are paused.', '新借款已暂停。')}</b> ${t('The guardian paused them. Repaying, sweeping and withdrawals keep working.', '守护者已暂停新借款。还款、归集（sweep）和提款不受影响。')}`);
+      return cl('w', html`<b>${t('New borrows are paused.', '新借款已暂停。')}</b> ${t('Repayments, sweeps and withdrawals remain open.', '还款、归集和提款照常开放。')}`);
     case 'feedoff':
       return cl('w', html`<b>${t('The rig data feed is off.', '矿机数据源已关闭。')}</b> ${t('New borrows wait until it is back. Open loans keep repaying.', '在恢复之前新借款暂停，进行中的贷款照常还款。')}`);
     case 'settling':
@@ -75,7 +75,7 @@ export function poolNotice(c: Ctx): Html {
       );
     }
     case 'noroom':
-      return cl('w', html`<b>${t('The pool has no room for a new advance right now.', '资金池当前没有可借额度。')}</b> ${t('The borrow cap, your per-borrower cap or the idle BEM is used up. Room comes back as loans are repaid or lenders supply.', '借款总额上限、单个借款人上限或闲置 BEM 已用完。贷款偿还或出借人存入后额度会恢复。')}`);
+      return cl('w', html`<b>${t('No borrowing capacity available.', '暂无可借额度。')}</b> ${t('A borrowing limit was reached or the pool has too little idle BEM.', '已达借款上限，或资金池中的闲置 BEM 不足。')}`);
     default:
       return EMPTY;
   }
@@ -132,7 +132,7 @@ export function gate(c: Ctx, title: string): Html {
   return html`<div class="v2-title"><div><h1>${title}</h1></div></div><section class="v2-card"><div class="empty v2-connect"><div class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2" stroke="#6FC3EC" stroke-width="1.6"></rect><path d="M16 12.5H18" stroke="#6FC3EC" stroke-width="1.6" stroke-linecap="round"></path><path d="M6 6V5.5A1.5 1.5 0 0 1 7.5 4H17" stroke="#6FC3EC" stroke-width="1.6"></path></svg></div>${
     wrong
       ? html`<h2>${t('Switch to X Layer', '切换到 X Layer')}</h2><p>${t('Your wallet is on another network. TapePool runs on X Layer (chain 196).', '您的钱包当前在其他网络。TapePool 运行在 X Layer（链 ID 196）上。')}</p>${lock ? EMPTY : html`<button type="button" class="btn btn-p btn-lg" data-a="switchnet">${t('Switch network', '切换网络')}</button>`}`
-      : html`<h2>${t('Connect your wallet', '连接钱包')}</h2><p>${t('Connect your wallet on X Layer to see your supplies, your loans and your Rig Agents.', '在 X Layer 上连接钱包，查看您的存款、贷款和“矿机代理”（Rig Agent）。')}</p>${lock ? EMPTY : html`<button type="button" class="btn btn-p btn-lg" data-a="connect">${t('Connect wallet', '连接钱包')}</button>`}`
+      : html`<h2>${t('Connect your wallet', '连接钱包')}</h2><p>${t('Connect on X Layer to view your position.', '连接 X Layer 钱包即可查看仓位。')}</p>${lock ? EMPTY : html`<button type="button" class="btn btn-p btn-lg" data-a="connect">${t('Connect wallet', '连接钱包')}</button>`}`
   }</div></section>`;
 }
 
@@ -140,8 +140,8 @@ export function gate(c: Ctx, title: string): Html {
 export function bootCard(title: string, state: 'loading' | 'failed'): Html {
   const body =
     state === 'loading'
-      ? html`<div class="ascii-art" aria-hidden="true"><pre data-ascii="sand">${hourglassFrame(0)}</pre></div><h2 class="ascii" data-ascii="loop" data-ascii-preset="art" data-ascii-text="${t('Reading from X Layer…', '正在读取 X Layer 数据…')}">${t('Reading from X Layer…', '正在读取 X Layer 数据…')}</h2><p>${t('The app reads the contracts directly. This takes a few seconds.', '应用直接读取链上合约，需要几秒钟。')}</p><div class="ascii-art bp" aria-hidden="true"><pre data-ascii="loop" data-ascii-preset="blueprint" data-ascii-text="${TERMINAL}">${TERMINAL}</pre></div>`
-      : html`<h2>${t('Could not reach X Layer.', '无法连接 X Layer。')}</h2><p>${t('The app reads the chain directly and got no answer. It tries again every few seconds.', '应用直接读取链上数据但未得到响应，会每隔几秒自动重试。')}</p>`;
+      ? html`<div class="ascii-art" aria-hidden="true"><pre data-ascii="sand">${hourglassFrame(0)}</pre></div><h2 class="ascii" data-ascii="loop" data-ascii-preset="art" data-ascii-text="${t('Reading from X Layer…', '正在读取 X Layer 数据…')}">${t('Reading from X Layer…', '正在读取 X Layer 数据…')}</h2><div class="ascii-art bp" aria-hidden="true"><pre data-ascii="loop" data-ascii-preset="blueprint" data-ascii-text="${TERMINAL}">${TERMINAL}</pre></div>`
+      : html`<h2>${t('Could not reach X Layer.', '无法连接 X Layer。')}</h2><p>${t('Retrying in a few seconds.', '将在几秒后重试。')}</p>`;
   return html`<div class="v2-title"><div><h1>${title}</h1></div></div><section class="v2-card"><div class="empty v2-connect${state === 'loading' ? ' boot' : ''}">${body}</div></section>`;
 }
 

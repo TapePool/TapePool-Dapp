@@ -1,5 +1,5 @@
 import type { AppError } from './chain/errors';
-import type { Address, PrincipalQuote, TermIndex } from './model';
+import type { Address, PrincipalQuote, TermIndex, TransactionKind } from './model';
 import type { Flash } from './source';
 
 /** What the right column of the connect dialog shows. */
@@ -16,6 +16,8 @@ export type PickerView =
  * Everything about agents, vouchers and reports comes from the snapshot, so a reload resumes the borrow flow.
  */
 export interface UiState {
+  transactionKind: TransactionKind | 'all';
+  transactionLimit: number;
   /** Rig ids picked for the borrow flow. */
   sel: number[];
   /** The group page lets several rigs be picked. */
@@ -53,6 +55,8 @@ export interface UiState {
 
 export function freshUi(): UiState {
   return {
+    transactionKind: 'all',
+    transactionLimit: 10,
     sel: [],
     group: false,
     term: 0,

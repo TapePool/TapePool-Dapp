@@ -52,6 +52,8 @@ if (import.meta.env.DEV && fixtureName !== null) {
     config,
     x,
     b,
+    activityReader: __TP_HISTORY_RPC__ && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+      ? viemReader(createRpc({ url: './__pool-history' }), 'pool history') : undefined,
     wallet,
     keeper: createKeeperClient(config.keeperUrl),
     store: localStore(),

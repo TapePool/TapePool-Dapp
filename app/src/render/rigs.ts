@@ -24,7 +24,7 @@ export function rigWhy(r: RigView): string {
     case 'not-mining':
       return t('This rig is not mining on BSC: it is stopped, revoked or not in custody. There is nothing to borrow against.', '这台矿机在 BSC 上没有在挖矿：已停止、被撤销或不在托管中，无法借款。');
     case 'processor':
-      return t('Its processor is not supported. Only TapeOut, Behemoth and RefBench rigs can borrow.', '不支持该矿机的处理器。只有 TapeOut、Behemoth 和 RefBench 的矿机可以借款。');
+      return t('This processor is not supported. Use TapeOut, Behemoth or RefBench.', '不支持该矿机的处理器。可用 TapeOut、Behemoth 或 RefBench。');
     case 'not-synced':
       return t('The voucher on X Layer has not synced with the rig yet. Harvest once on tapeout.net to sync it.', 'X Layer 上的凭证尚未与矿机同步。请先在 tapeout.net 上领取一次收益以完成同步。');
     case 'mismatch':
@@ -32,10 +32,10 @@ export function rigWhy(r: RigView): string {
     case 'too-new':
       return t(`A rig needs to be at least 3 days old. This one can borrow from ${fd(s.readyAt, true)}.`, `矿机需上线满 3 天，本矿机 ${fd(s.readyAt, true)} 起可借。`);
     case 'no-base-power':
-      return t('Its base power is 0, so there is nothing to borrow against. Only base power counts; the design bonus is left out.', '基础算力为 0，无法借款。只计算基础算力，不计设计加成。');
+      return t('Its base power is 0. Design bonuses do not count.', '基础算力为 0，设计加成不计入。');
     case 'not-screened':
       if (s.why === 'suspended') return t('The screen pass of this rig is suspended, so it cannot borrow until it is screened again.', '这台矿机的筛查通过记录已被暂停，重新筛查前无法借款。');
-      if (s.why === 'changed') return t('This rig changed since it was screened, so the pass no longer applies. It needs a new screen.', '这台矿机在筛查之后发生了变化，原有的通过记录不再适用，需要重新筛查。');
+      if (s.why === 'changed') return t('This rig changed and needs a new screen.', '矿机已变更，需重新筛查。');
       return screenNote();
     case 'screen-pending':
       return t(`The screen passed. It counts from ${fd(s.effectiveAt, true)}, 48 h after it was recorded on-chain.`, `筛查已通过，${fd(s.effectiveAt, true)} 起生效（链上记录 48 小时后）。`);
@@ -221,7 +221,7 @@ export function rigsPage(c: Ctx): Html {
   const mine = orderedRigs(snap);
   const ready = readyRigs(snap).filter((r) => r.facts.place.kind === 'wallet').length;
   const k = keeperStat(c);
-  return html`<div class="v2-title"><div><h1>${t('Rigs', '矿机')}</h1><p>${t('Your TapeOut rigs on X Layer. Borrow against a ready rig; a rig in a loan repays it once it is harvested.', '您在 X Layer 上的 TapeOut 矿机。可用就绪的矿机借款；贷款中的矿机在领取收益后自动还款。')}</p></div>${assetSeg()}</div>
+  return html`<div class="v2-title"><div><h1>${t('Rigs', '矿机')}</h1><p>${t('Choose a rig to borrow or manage a loan.', '选择矿机即可借款或管理贷款。')}</p></div>${assetSeg()}</div>
     ${poolNotice(c)}
     <section class="v2-stats" aria-label="${t('Your rigs', '我的矿机')}">
       <div class="v2-stat"><span class="l">${t('Total debt', '债务合计')}</span><span class="v mono">${bem4(debt)} <span class="u">BEM</span></span><span class="s">${t('Principal, fee and late fee left', '剩余本金、费用和滞纳金')}</span></div>
@@ -306,8 +306,7 @@ export function groupPage(c: Ctx): Html {
   const ops = snap.pool.params.opsFee[0];
   const rows = snap.rigs.filter((r) => r.facts.place.kind === 'wallet' || r.state.kind === 'in-agent');
   const picker = html`<section class="v2-card" aria-labelledby="a1"><div class="v2-card-h"><h2 id="a1"><span class="uid" aria-hidden="true">1</span>${t('Choose rigs', '选择矿机')}</h2><span class="meta">${t(`${n} selected · up to ${MAX_COLLATERAL}`, `已选 ${n} 台 · 最多 ${MAX_COLLATERAL} 台`)}</span></div><div class="rigs">${join(rows.map((r) => rigRow(c, r)))}</div>
-    <div class="v2-card-b bt">${cl('w', html`<b>${t('Grouped rigs share one fate.', '合并后的矿机共担风险。')}</b> ${ops > 0n ? t(`Every rig in the group backs the whole loan. If any one of them is proven impaired, the pool can seize every rig in the group. Grouping saves the extra ${native(ops)} OKB fees and transactions of separate loans.`, `组内每台矿机都为整笔贷款担保。只要其中一台被链上证明受损，资金池可以没收该组全部矿机。合并可以省去分开借款所需的额外 ${native(ops)} OKB 运营费和交易。`) : t('Every rig in the group backs the whole loan. If any one of them is proven impaired, the pool can seize every rig in the group. Grouping saves the extra transactions of separate loans.', '组内每台矿机都为整笔贷款担保。只要其中一台被链上证明受损，资金池可以没收该组全部矿机。合并可以省去分开借款所需的额外交易。')}`)}</div></section>`;
-  const sub = ops > 0n ? t('One debt and one OKB fee across rigs. Most miners should borrow rig by rig.', '多台矿机共用一笔债务和一笔 OKB 运营费。大多数矿工应逐台借款。') : t('One debt across rigs. Most miners should borrow rig by rig.', '多台矿机共用一笔债务。大多数矿工应逐台借款。');
-  return html`${back(c.link('/rigs'), t('All rigs', '全部矿机'))}<div class="v2-title"><div><h1>${t('One loan for several rigs', '多台矿机合并借款')}</h1><p>${sub}</p></div></div>${poolNotice(c)}${flow(c, picker)}`;
+    <div class="v2-card-b bt">${cl('w', html`<b>${t('Grouped rigs share one fate.', '合并后的矿机共担风险。')}</b> ${ops > 0n ? t(`If one rig is proven impaired, the pool can seize the whole group. Grouping saves the extra ${native(ops)} OKB fees and transactions of separate loans.`, `若链上证实一台矿机受损，资金池可没收整组矿机。合并可以省去分开借款所需的额外 ${native(ops)} OKB 运营费和交易。`) : t('If one rig is proven impaired, the pool can seize the whole group. Grouping saves the extra transactions of separate loans.', '若链上证实一台矿机受损，资金池可没收整组矿机。合并可以省去分开借款所需的额外交易。')}`)}</div></section>`;
+  return html`${back(c.link('/rigs'), t('All rigs', '全部矿机'))}<div class="v2-title"><div><h1>${t('One loan for several rigs', '多台矿机合并借款')}</h1></div></div>${poolNotice(c)}${flow(c, picker)}`;
 }
 

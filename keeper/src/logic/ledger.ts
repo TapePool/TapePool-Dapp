@@ -1,5 +1,5 @@
 // The position index (SPEC-PHASE5-APP §8.2): what each address put into the pool and took out, from the
-// pool's own ERC-4626 and tpBEM Transfer events. Pure: the caller does the I/O.
+// pool's ERC-4626 and tpBEM Transfer events, plus borrower history from Lent and RepaymentReceived.
 //
 // Per address: `net` is signed (+Deposit.assets credited to `owner`, -Withdraw.assets debited from
 // `owner`); `xfer` is set on BOTH ends of any tpBEM transfer that is neither a mint nor a burn, because
@@ -14,7 +14,18 @@ export interface AccountRec {
   first: number; // unix seconds, 0 when the address never deposited
 }
 
+interface PoolTransaction {
+  kind: "supply" | "withdraw" | "borrow" | "repay";
+  amount: string;
+  hash: string;
+  time: number;
+}
+
+const HISTORY_LIMIT = 100;
+
 export interface IndexState {
+  borrowers: Record<string, string>; // agent -> borrower from Lent
+  transactions: Record<string, PoolTransaction[]>; // newest first
   pool: string; // lowercase pool address the index belongs to ("" before deployment)
   cursor: string; // next X Layer block to scan
   time: number; // unix seconds of block `timeBlock`, 0 when unknown
@@ -22,20 +33,24 @@ export interface IndexState {
   accounts: Record<string, AccountRec>; // lowercase address -> record
 }
 
-export const emptyIndex = (): IndexState => ({ pool: "", cursor: "0", time: 0, timeBlock: "", accounts: {} });
+export const emptyIndex = (): IndexState => ({ pool: "", cursor: "0", time: 0, timeBlock: "", accounts: {}, borrowers: {}, transactions: {} });
 
 export type LedgerEvent =
-  | { kind: "deposit"; owner: string; assets: bigint; block: bigint }
-  | { kind: "withdraw"; owner: string; assets: bigint }
+  | ({ block: bigint; hash: string; amount: bigint } & (
+      | { kind: "supply" | "withdraw"; owner: string }
+      | { kind: "borrow"; agent: string; owner: string }
+      | { kind: "repay"; agent: string }
+    ))
   | { kind: "transfer"; from: string; to: string };
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
-/** A decoded log as viem returns it from `getLogs` with the pool's three events. */
+/** A decoded log as viem returns it from `getLogs` for the pool's indexed events. */
 export interface RawLog {
   eventName?: string;
   args?: unknown;
   blockNumber?: bigint | null;
+  transactionHash?: string | null;
 }
 
 /** Decode one log; throws on anything unexpected, so a page that cannot be read is never half-applied. */
@@ -49,12 +64,20 @@ export function decodeLedgerLog(log: RawLog): LedgerEvent {
     if (typeof v !== "bigint" || v < 0n) throw new Error(`bad amount in a ${log.eventName} log`);
     return v;
   };
+  function metadata() {
+    if (typeof log.blockNumber !== "bigint" || !log.transactionHash || !/^0x[0-9a-f]{64}$/i.test(log.transactionHash)) {
+      throw new Error("missing pool transaction metadata");
+    }
+    return { block: log.blockNumber, hash: log.transactionHash };
+  }
   switch (log.eventName) {
     case "Deposit":
-      if (typeof log.blockNumber !== "bigint") throw new Error("a Deposit log has no block number");
-      return { kind: "deposit", owner: addr(a.owner), assets: amount(a.assets), block: log.blockNumber };
     case "Withdraw":
-      return { kind: "withdraw", owner: addr(a.owner), assets: amount(a.assets) };
+      return { kind: log.eventName === "Deposit" ? "supply" : "withdraw", owner: addr(a.owner), amount: amount(a.assets), ...metadata() };
+    case "Lent":
+      return { kind: "borrow", agent: addr(a.agent), owner: addr(a.borrower), amount: amount(a.amount), ...metadata() };
+    case "RepaymentReceived":
+      return { kind: "repay", agent: addr(a.agent), amount: amount(a.fee) + amount(a.principal), ...metadata() };
     case "Transfer":
       amount(a.value);
       return { kind: "transfer", from: addr(a.from), to: addr(a.to) };
@@ -63,36 +86,37 @@ export function decodeLedgerLog(log: RawLog): LedgerEvent {
   }
 }
 
-/** The blocks whose timestamp the page needs: those of deposits that are an address's first. */
-export function blocksNeedingTime(state: IndexState, events: readonly LedgerEvent[]): bigint[] {
-  const seen = new Set<string>();
-  const blocks = new Set<bigint>();
-  for (const e of events) {
-    if (e.kind !== "deposit" || seen.has(e.owner)) continue;
-    seen.add(e.owner);
-    if ((state.accounts[e.owner]?.first ?? 0) === 0) blocks.add(e.block);
-  }
-  return [...blocks];
-}
-
 function account(state: IndexState, address: string): AccountRec {
   return (state.accounts[address] ??= { net: "0", xfer: false, first: 0 });
 }
 
-/** Apply events in log order. `timeOf` gives a block's timestamp for `blocksNeedingTime`; it must not fail. */
+/** Resolve all borrowers before committing the page. A loan can open and repay on the same page. */
 export function applyEvents(state: IndexState, events: readonly LedgerEvent[], timeOf: (block: bigint) => number): void {
-  for (const e of events) {
-    if (e.kind === "deposit") {
-      const rec = account(state, e.owner);
-      rec.net = (BigInt(rec.net) + e.assets).toString();
-      if (rec.first === 0) rec.first = timeOf(e.block);
-    } else if (e.kind === "withdraw") {
-      const rec = account(state, e.owner);
-      rec.net = (BigInt(rec.net) - e.assets).toString();
-    } else if (e.from !== ZERO_ADDRESS && e.to !== ZERO_ADDRESS) {
-      account(state, e.from).xfer = true;
-      account(state, e.to).xfer = true;
+  const newBorrowers: Record<string, string> = {};
+  const rows = events.map((e) => {
+    if (e.kind === "transfer") return e;
+    if (e.kind === "borrow") newBorrowers[e.agent] = e.owner;
+    const owner = e.kind === "repay" ? newBorrowers[e.agent] ?? state.borrowers[e.agent] : e.owner;
+    if (!owner) throw new Error("repayment without a recorded borrower");
+    return { ...e, owner, time: timeOf(e.block) };
+  });
+  Object.assign(state.borrowers, newBorrowers);
+  for (const e of rows) {
+    if (e.kind === "transfer") {
+      if (e.from !== ZERO_ADDRESS && e.to !== ZERO_ADDRESS) {
+        account(state, e.from).xfer = true;
+        account(state, e.to).xfer = true;
+      }
+      continue;
     }
+    if (e.kind === "supply" || e.kind === "withdraw") {
+      const rec = account(state, e.owner);
+      rec.net = (BigInt(rec.net) + (e.kind === "supply" ? e.amount : -e.amount)).toString();
+      if (e.kind === "supply" && rec.first === 0) rec.first = e.time;
+    }
+    const recent = state.transactions[e.owner] ??= [];
+    recent.unshift({ kind: e.kind, amount: e.amount.toString(), hash: e.hash, time: e.time });
+    if (recent.length > HISTORY_LIMIT) recent.pop();
   }
 }
 
@@ -108,8 +132,18 @@ export function cleanIndex(raw: unknown): IndexState {
     if (!ADDRESS.test(k) || !v || typeof v.net !== "string" || !/^-?\d+$/.test(v.net) || typeof v.xfer !== "boolean") return emptyIndex();
     accounts[k.toLowerCase()] = { net: v.net, xfer: v.xfer, first: typeof v.first === "number" && v.first > 0 ? v.first : 0 };
   }
+  // Balance-only files replay the public index from deployment to recover prior transactions.
+  if (!r.borrowers || !r.transactions || typeof r.borrowers !== "object" || typeof r.transactions !== "object") return emptyIndex();
+  for (const [agent, owner] of Object.entries(r.borrowers)) {
+    if (!ADDRESS.test(agent) || !ADDRESS.test(owner)) return emptyIndex();
+  }
+  for (const [owner, rows] of Object.entries(r.transactions)) {
+    if (!ADDRESS.test(owner) || !Array.isArray(rows) || rows.length > HISTORY_LIMIT) return emptyIndex();
+    if (!rows.every((v) => v && ["supply", "withdraw", "borrow", "repay"].includes(v.kind) &&
+        isDigits(v.amount) && /^0x[0-9a-f]{64}$/i.test(v.hash) && Number.isSafeInteger(v.time) && v.time > 0)) return emptyIndex();
+  }
   const timed = typeof r.time === "number" && r.time > 0 && isDigits(r.timeBlock);
-  return { pool: r.pool.toLowerCase(), cursor: r.cursor, time: timed ? (r.time as number) : 0, timeBlock: timed ? (r.timeBlock as string) : "", accounts };
+  return { pool: r.pool.toLowerCase(), cursor: r.cursor, time: timed ? (r.time as number) : 0, timeBlock: timed ? (r.timeBlock as string) : "", accounts, borrowers: r.borrowers, transactions: r.transactions };
 }
 
 /** The `GET /v1/position/<address>` answer for a (lowercase) address; an unseen address reads as zero. */
@@ -117,6 +151,7 @@ export function positionBody(state: IndexState, address: string) {
   const rec = state.accounts[address];
   const indexedTo = BigInt(state.cursor) - 1n;
   return {
+    transactions: state.transactions[address] ?? [],
     netDeposited: rec?.net ?? "0",
     transferred: rec?.xfer ?? false,
     firstDepositAt: rec && rec.first > 0 ? rec.first : null,

@@ -13,6 +13,15 @@ import type { AppError } from './chain/errors';
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
 export type Sec = number;
+export type TransactionKind = 'supply' | 'withdraw' | 'borrow' | 'repay';
+
+export interface PoolTransaction {
+  kind: TransactionKind;
+  amount: bigint;
+  hash: Hex;
+  time: Sec;
+}
+
 export type TermIndex = 0 | 1;
 export type Processor = 'TapeOut' | 'Behemoth' | 'RefBench';
 
@@ -470,6 +479,7 @@ export interface Snapshot {
   pool: PoolView;
   rules: RulesView;
   position: PositionView | null;
+  transactions?: { rows: PoolTransaction[]; syncing: boolean };
   keeper: KeeperView;
   rigs: RigView[];
   agents: AgentView[];

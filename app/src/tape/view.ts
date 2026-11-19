@@ -319,7 +319,7 @@ function mountTrace(host: HTMLElement, s: Session): { unmount(): void; translate
     find('.trace-info').textContent = t('OKX index price', 'OKX 指数价格');
     find('.trace-explain').textContent = t('Virtual BEM only', '仅模拟 BEM');
     find('.trace-help summary').textContent = t('Rules', '规则');
-    find('.trace-help p').textContent = t('Choose a stake, then a target. A sampled price inside its time and price range wins; payout includes the stake. Prices are the OKX OKB-USD index; the game waits whenever it stops updating. Multipliers follow recent volatility with a 5% demo margin. No real funds are used.', '选择投注额和目标。采样价格在指定时间和价格区间内即获胜，返还包含本金。价格为 OKX 的 OKB-USD 指数，指数停止更新时游戏会等待。倍数根据近期波动计算，含 5% 演示差价。不使用真实资金。');
+    find('.trace-help p').textContent = t('Pick a stake and a target. Win if the OKX index enters the target during its time window. Payout includes your stake. The game pauses on stale prices. Multipliers reflect recent volatility and a 5% demo margin.', '选择投注额和目标。指定时段内，OKX 指数采样价进入目标区间即获胜，返还含本金。价格停止更新时游戏暂停。倍数按近期波动计算，含 5% 演示差价。');
     find('label').textContent = t('Stake', '投注额');
     find('[data-action="drawer"]').textContent = expanded ? t('Hide bets', '收起投注') : t('Show bets', '展开投注'); refresh();
   }

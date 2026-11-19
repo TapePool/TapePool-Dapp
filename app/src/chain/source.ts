@@ -40,6 +40,7 @@ import { collectable, minedR } from '../logic/harvest';
 import { allowanceMap, assembleFacts, borrowGasCost, mapAgents, mapPool, placesOf } from './map';
 import { readCircuit, readCore, readHoldings, readQuoteFor, readQuotes, readRigRecords, type AgentRaw, type CircuitRaw, type PolicyPins, type ReadEnv, type XLayerRig } from './reads';
 import type { Head, Reader } from './reader';
+import { WalletActivity } from './activity';
 import type { BscResult } from './bsc';
 import { legacyBorrowAbi } from './legacyAbi';
 import { rigAgentAbi } from './abi';
@@ -75,6 +76,8 @@ export interface SessionStore {
 export interface ChainSourceDeps {
   config: AppConfig;
   x: Reader;
+  /** Local server-side archive RPC used for history, when configured. */
+  activityReader?: Reader;
   b: Reader;
   wallet: WalletLike;
   keeper: KeeperClient;
@@ -121,6 +124,7 @@ interface WalletRes {
 
 interface Acct {
   target: Address;
+  activity: WalletActivity;
   wallet: WalletRes | null;
   holdings: { walletIds: bigint[]; agents: AgentRaw[] } | null;
   facts: RigFacts[] | null;
@@ -177,6 +181,7 @@ export class ChainSource implements DataSource, ActionHost {
   private keeperView: KeeperView = { reachable: false, apy7d: null, selfPushBnb: null };
   private keeperPos: { address: string; data: KeeperPosition | null } | null = null;
   private keeperDownUntil = 0;
+  private showTransactions = false;
   private pendingTx: PendingTx | null;
   /** The pending mark was loaded from `sessionStorage` after a reload and no action in this session has taken it over. */
   private restored = false;
@@ -231,13 +236,15 @@ export class ChainSource implements DataSource, ActionHost {
     return () => this.listeners.delete(listener);
   }
 
-  snapshot(view: Address | null): Snapshot {
+  snapshot(view: Address | null, showTransactions = false): Snapshot {
+    const opened = showTransactions && !this.showTransactions;
+    this.showTransactions = showTransactions;
     const target = this.targetOf(view);
     if (!same(this.wanted, target)) {
       this.wanted = target;
       this.retarget(target);
       void this.refresh();
-    }
+    } else if (opened && this.acct?.holdings && this.head) this.readActivity(this.acct, this.head);
     return this.assemble(view, target);
   }
 
@@ -356,6 +363,7 @@ export class ChainSource implements DataSource, ActionHost {
   private newAcct(target: Address): Acct {
     return {
       target,
+      activity: new WalletActivity(this.cfg.book, target, this.deps.store),
       wallet: null,
       holdings: null,
       facts: null,
@@ -422,7 +430,18 @@ export class ChainSource implements DataSource, ActionHost {
 
     if (acct && gen === this.gen) await this.accountCycle(acct, core, head, gen);
     await keeperDone;
+    if (acct && gen === this.gen) this.readActivity(acct, head);
     this.emit();
+  }
+
+  private readActivity(acct: Acct, head: Head): void {
+    const keeper = this.keeperPos?.data;
+    if (!acct.holdings || (!this.deps.activityReader && keeper?.transactions && keeper.indexedToTime && head.timestamp - keeper.indexedToTime <= 300)) return;
+    const active = () => this.acct === acct && !this.disposed && this.showTransactions &&
+      (typeof document === 'undefined' || document.visibilityState !== 'hidden');
+    const archive = this.deps.activityReader;
+    void acct.activity.refresh(archive ?? this.deps.x, head.number - 10n, acct.holdings.agents.map(a => a.address),
+      archive ? 10000n : 100n, active, () => this.emit());
   }
 
   private async accountCycle(acct: Acct, core: Awaited<ReturnType<typeof readCore>>, head: Head, gen: number): Promise<void> {
@@ -748,6 +767,7 @@ export class ChainSource implements DataSource, ActionHost {
       allowanceAgent: acct?.holdings ? allowanceMap(acct.holdings.agents) : {},
       ...(w.options ? { options: w.options(), active: w.active?.() ?? null, recent: w.recent?.() ?? null } : {}),
     };
+    const keeperPosition = this.keeperPos && same(this.keeperPos.address, acct?.target) ? this.keeperPos.data : null;
     const aw = acct?.wallet;
     const position = aw
       ? {
@@ -755,7 +775,7 @@ export class ChainSource implements DataSource, ActionHost {
           value: aw.value,
           withdrawable: aw.withdrawable,
           maxDeposit: aw.maxDeposit,
-          growth: growthOf(aw.value, this.keeperPos && same(this.keeperPos.address, acct?.target) ? this.keeperPos.data : null, now),
+          growth: growthOf(aw.value, keeperPosition, now),
         }
       : null;
 
@@ -770,6 +790,10 @@ export class ChainSource implements DataSource, ActionHost {
       pool: this.pool ?? emptyPool(this.cfg),
       rules: { totalVerifWeight: acct?.totalVerifWeight ?? this.totalVerifWeight, emissionValidUntil: this.pins ? Number(this.pins.emissionValidUntil) : 0 },
       position,
+      transactions: !this.deps.activityReader && keeperPosition?.transactions && keeperPosition.indexedToTime && now - keeperPosition.indexedToTime <= 300 ? {
+        rows: keeperPosition.transactions,
+        syncing: false,
+      } : acct?.activity.view,
       keeper: { ...this.keeperView, selfPushBnb: acct?.selfPushBnb ?? null },
       rigs,
       agents,

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { Keeper } from "../src/keeper.js";
 import { PublicData, INDEX_MAX_PAGES, INDEX_PAGE_GAP_MS, SNAPSHOT_DAYS_PER_CYCLE, SNAPSHOT_FAILS_BEFORE_SKIP } from "../src/publicData.js";
 import { ONE_SHARE, annualise, apy7d, cleanStats, dayLabel, pickThen, type Snapshot } from "../src/logic/apy.js";
-import { applyEvents, blocksNeedingTime, cleanIndex, decodeLedgerLog, emptyIndex, positionBody, type LedgerEvent } from "../src/logic/ledger.js";
+import { applyEvents, cleanIndex, decodeLedgerLog, emptyIndex, positionBody, type LedgerEvent } from "../src/logic/ledger.js";
 import { firstBlockAtOrAfter } from "../src/logic/blockSearch.js";
 import { READ_LIMITS, ReadLimiter } from "../src/logic/readLimits.js";
 import { emptyState, loadState, saveState, type KeeperState } from "../src/state.js";
@@ -78,11 +78,12 @@ function fakeChain(opts: ChainOpts) {
     },
     getLogs: async (a: { address: string; events: readonly unknown[]; fromBlock: bigint; toBlock: bigint }) => {
       expect(a.address.toLowerCase()).toBe(POOL);
-      expect(a.events.length).toBe(3);
+      expect(a.events.length).toBe(5);
       calls.logs.push([a.fromBlock, a.toBlock]);
       if (a.toBlock - a.fromBlock + 1n > 100n) throw new Error("range too large");
       if (opts.failLogs?.()) throw new Error("rpc down");
       return (opts.logs ?? [])
+        .map((l) => ({ ...l, transactionHash: "0x" + l.blockNumber.toString(16).padStart(64, "0") }))
         .filter((l) => l.blockNumber >= a.fromBlock && l.blockNumber <= a.toBlock)
         .sort((x, y) => (x.blockNumber === y.blockNumber ? x.logIndex - y.logIndex : x.blockNumber < y.blockNumber ? -1 : 1));
     },
@@ -439,8 +440,8 @@ describe("position index", () => {
     expect(pos(pd, s)).toMatchObject({ netDeposited: "0", transferred: false, firstDepositAt: null }); // the sender is credited nothing
     expect(pos(pd, A(0x99))).toMatchObject({ netDeposited: "0", transferred: false, firstDepositAt: null }); // never seen
     expect(pos(pd, a.toUpperCase().replace("0X", "0x"))).toMatchObject({ netDeposited: "1100" }); // any case
-    // only the block of an address's first deposit is read for its time
-    expect(f.chain.calls.getBlock.filter((x) => x === String(B0 + 250n))).toEqual([]);
+    // each active block is read once, including repeat deposits
+    expect(f.chain.calls.getBlock.filter((x) => x === String(B0 + 250n))).toHaveLength(1);
     expect(f.chain.calls.getBlock.filter((x) => x === String(B0 + 5n)).length).toBe(1);
   });
 
@@ -454,16 +455,24 @@ describe("position index", () => {
     expect(state.accounts[A(3)]).toBeUndefined();
   });
 
-  it("asks for a block time only for an address's first deposit", () => {
-    const state = emptyIndex();
-    state.accounts[A(2)] = { net: "5", xfer: false, first: 123 };
-    const evs: LedgerEvent[] = [
-      { kind: "deposit", owner: A(1), assets: 1n, block: 10n },
-      { kind: "deposit", owner: A(1), assets: 1n, block: 11n },
-      { kind: "deposit", owner: A(2), assets: 1n, block: 12n },
-      { kind: "deposit", owner: A(3), assets: 1n, block: 10n },
-    ];
-    expect(blocksNeedingTime(state, evs)).toEqual([10n]);
+  it("attributes borrows and repayments to the borrower across a restart", async () => {
+    const agent = A(7);
+    const owner = A(9);
+    const f = fakeChain({ head: B0 + 20n, logs: [
+      { blockNumber: B0, logIndex: 0, eventName: "Lent", args: { borrower: owner, agent, amount: 80n } },
+      { blockNumber: B0 + 15n, logIndex: 1, eventName: "RepaymentReceived", args: { agent, fee: 2n, principal: 80n, toReserve: 1n } },
+    ] });
+    const first = make(f.clients);
+    await first.pd.run();
+    first.state.index = cleanIndex(JSON.parse(JSON.stringify(first.state.index)));
+    const next = make(f.clients, first.state);
+    f.chain.head += 10n;
+    await next.pd.run();
+    expect(next.pd.position(owner).body).toMatchObject({ netDeposited: "0", transactions: [
+      { kind: "repay", amount: "82", time: linear(B0 + 15n) },
+      { kind: "borrow", amount: "80", time: linear(B0) },
+    ] });
+    expect(next.pd.position(agent).body).toMatchObject({ transactions: [] });
   });
 
   it("applies nothing and keeps the cursor when a page cannot be read or decoded", async () => {
@@ -514,7 +523,8 @@ describe("position index", () => {
   });
 
   it("decodes only what it understands", () => {
-    expect(decodeLedgerLog({ eventName: "Withdraw", args: { owner: A(1).toUpperCase().replace("0X", "0x"), assets: 5n } })).toEqual({ kind: "withdraw", owner: A(1), assets: 5n });
+    const hash = "0x" + "1".repeat(64);
+    expect(decodeLedgerLog({ transactionHash: hash, blockNumber: 3n, eventName: "Withdraw", args: { owner: A(1).toUpperCase().replace("0X", "0x"), assets: 5n } })).toEqual({ kind: "withdraw", owner: A(1), amount: 5n, block: 3n, hash });
     expect(() => decodeLedgerLog({ eventName: "Deposit", args: { owner: A(1), assets: 5n }, blockNumber: null })).toThrow();
     expect(() => decodeLedgerLog({ eventName: "Deposit", args: { owner: A(1), assets: -5n }, blockNumber: 5n })).toThrow();
     expect(() => decodeLedgerLog({ eventName: "Approval", args: {} })).toThrow();
@@ -605,7 +615,8 @@ describe("state sections", () => {
       expect(bad.stats).toEqual(emptyState(1n).stats);
       expect(bad.index).toEqual(emptyIndex());
       expect(cleanStats({ pool: "0xAB", nextDay: 3, snapshots: [{ day: 2, block: "5", time: 9, price: "7" }, { day: 2, block: "6", time: 9, price: "8" }, { day: -1 }] }).snapshots).toEqual([{ day: 2, block: "6", time: 9, price: "8" }]);
-      expect(cleanIndex({ pool: "0xAB", cursor: "7", time: 5, timeBlock: "6", accounts: { [A(0xab).toUpperCase().replace("0X", "0x")]: { net: "-4", xfer: true, first: 3 } } }).accounts[A(0xab)]).toEqual({ net: "-4", xfer: true, first: 3 });
+      expect(cleanIndex({ pool: POOL, cursor: "7000", accounts: {} })).toEqual(emptyIndex());
+      expect(cleanIndex({ ...emptyIndex(), pool: POOL, cursor: "7", accounts: { [A(0xab).toUpperCase().replace("0X", "0x")]: { net: "-4", xfer: true, first: 3 } } }).accounts[A(0xab)]).toEqual({ net: "-4", xfer: true, first: 3 });
     });
   });
 

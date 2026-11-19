@@ -60,7 +60,7 @@ export function cl(kind: CalloutKind, content: Part, act: Part = null): Html {
 
 /** The FabX and FAB placeholders stay on purpose (SPEC-PHASE5-APP S-2). */
 export const soonTip = (): string =>
-  t('A FAB pool for FabX rigs is planned. It is not live, so there is nothing to supply or borrow yet.', 'FabX 矿机的 FAB 资金池正在计划中，尚未上线，目前无法存入或借款。');
+  t('The FAB pool will support FabX rigs.', 'FAB 资金池计划支持 FabX 矿机。');
 export const soon = (title: string = soonTip()): Html => html`<span class="soon" title="${title}">${t('Coming soon', '即将上线')}</span>`;
 
 export const back = (href: string, label: Part): Html => html`<a class="back" href="${href}">← ${label}</a>`;

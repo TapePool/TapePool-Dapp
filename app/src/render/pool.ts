@@ -5,7 +5,7 @@ import { t } from '../i18n';
 import { borrowCapOf } from '../logic/selectors';
 import { totals, apyTooltip } from './markets';
 import { supplyBody } from './supply';
-import { B, M, back, cl, img, ring, tip, type Ctx } from './ui';
+import { B, M, back, img, ring, tip, type Ctx } from './ui';
 
 const kv = (rows: [Part, Part][]): Html => html`<dl class="kv m0">${join(rows.map(([k, v]) => html`<div><dt>${k}</dt><dd>${v}</dd></div>`))}</dl>`;
 
@@ -53,7 +53,7 @@ export function poolPage(c: Ctx): Html {
     ])}</div><div class="v2-card-f">${t('Debt is in BEM and repaid in BEM, so the BEM price never triggers a liquidation. A slow rig is never seized; only a rig proven impaired on-chain can be.', '债务以 BEM 计价、以 BEM 偿还，因此 BEM 价格永远不会触发清算。产出慢的矿机绝不会被没收；只有被链上证明受损的矿机才可能被没收。')}</div></section>`;
 
   const ck = pool.circuit;
-  const ruleCard = html`<section class="v2-card" aria-labelledby="p3"><div class="v2-card-h"><h2 id="p3"><span class="uid" aria-hidden="true">P3</span>${t('Credit rule', '信用规则')}</h2><span class="meta pi">${img('tapeout')}${t('TapeOut circuit on X Layer', 'X Layer 上的 TapeOut 电路')}</span></div><div class="v2-card-b col g12"><p class="m0 c-soft">${t('Every advance must pass a public TapeOut circuit, evaluated on X Layer. Anyone can read and verify the rule; no one can change it quietly.', '每笔借款都必须通过在 X Layer 上执行的公开 TapeOut 电路。任何人都可以读取并验证这条信用规则，没有人能悄悄修改它。')}</p>
+  const ruleCard = html`<section class="v2-card" aria-labelledby="p3"><div class="v2-card-h"><h2 id="p3"><span class="uid" aria-hidden="true">P3</span>${t('Credit rule', '信用规则')}</h2><span class="meta pi">${img('tapeout')}${t('TapeOut circuit on X Layer', 'X Layer 上的 TapeOut 电路')}</span></div><div class="v2-card-b col g12"><p class="m0 c-soft">${t('Each loan must pass a public TapeOut circuit on X Layer.', '每笔贷款均须通过 X Layer 上公开的 TapeOut 电路验证。')}</p>
     ${kv([
       [t('Processor', '处理器'), `${ck.processorName} (${ck.processorSymbol})`],
       [t('Circuits contract', 'Circuits 合约'), addr(ck.circuits)],
@@ -68,11 +68,11 @@ export function poolPage(c: Ctx): Html {
   const k = pool.contracts;
   const contractsCard = html`<section class="v2-card" aria-labelledby="p4"><div class="v2-card-h"><h2 id="p4"><span class="uid" aria-hidden="true">P4</span>${t('Contracts and admin', '合约与管理权限')}</h2></div><div class="v2-card-b col g12">
     ${kv([['TapePool (tpBEM)', addr(k.pool)], ['AgentFactory', addr(k.factory)], ['CreditPolicy', addr(k.policy)], ['RigScreen', addr(k.screen)], ['BEM (OFT)', addr(k.bem)]])}
-    <p class="mut m0 t12">${t('The owner can lower caps at once. Every other change, fees included, waits 48 h in a public queue, within hard limits in the code. No one can move pool funds or vouchers.', '所有者可以立即降低上限；其他所有变更（包括费用）都需在公开队列中等待 48 小时，并受代码中的硬性上限约束。任何人都无法挪用资金池资金或凭证。')}</p>
-    ${cl('w', t('Smart contracts carry risk. You can lose funds.', '智能合约存在风险，您可能损失资金。'))}</div></section>`;
+    <p class="mut m0 t12">${t('The owner can lower caps immediately. Fee changes and cap increases wait 48 hours. Admin functions cannot transfer funds or vouchers.', '所有者可立即降低上限。调费或提高上限需等待 48 小时。管理功能无法转移资金或凭证。')}</p>
+    </div></section>`;
 
   return html`${back(c.link('/markets'), t('Markets', '市场'))}
-    <div class="v2-title"><div class="head-id">${img('bem', 'i-44')}<div><h1>${t('BEM pool', 'BEM 资金池')}</h1><p>${t('TapePool on X Layer · lend BEM to TapeOut miners', 'TapePool · X Layer · 向 TapeOut 矿工出借 BEM')}</p></div></div>${totals(c)}</div>
+    <div class="v2-title"><div class="head-id">${img('bem', 'i-44')}<div><h1>${t('BEM pool', 'BEM 资金池')}</h1></div></div>${totals(c)}</div>
     <div class="pw"><div class="v2-stack">${supplyCard}${borrowCard}${ruleCard}${contractsCard}</div><aside>${sideCard(c)}</aside></div>`;
 }
 

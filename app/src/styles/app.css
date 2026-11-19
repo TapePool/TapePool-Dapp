@@ -266,3 +266,23 @@
   .v2-hd[data-local-nav] .v2-nav a{white-space:nowrap;flex:none}
   .v2-hd[data-local-nav] .right{margin-left:auto}
 }
+
+.tx-card .v2-card-h { flex-wrap: wrap; gap: 10px; }
+.tx-card select { font: inherit; font-size: 13px; color: #e6f1ff; color-scheme: dark; background: #142847; border: 1px solid #355675; border-radius: 6px; padding: 7px 10px; }
+.tx-days { padding: 0 20px 8px; }
+.tx-days h3 { margin: 18px 0 4px; font-size: 14px; }
+.tx-days ul { margin: 0; padding: 0; list-style: none; }
+.tx-row { display: grid; grid-template-columns: 32px minmax(6rem, .8fr) minmax(8rem, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid rgba(111,195,236,.12); }
+.tx-row:last-child { border-bottom: 0; }
+.tx-direction { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #193557; color: #a6dfff; }
+.tx-row time, .tx-empty { color: #a4b5cd; }
+.tx-row time { display: block; font-size: 12px; }
+.tx-value { display: inline-flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
+.tx-value img { width: 20px; height: 20px; border-radius: 5px; }
+.tx-link { color: #86d5ff; font-size: 12px; }
+.tx-empty { margin: 0; padding: 20px; }
+@media (max-width: 600px) {
+  .tx-row { grid-template-columns: 30px minmax(0, 1fr) minmax(0, 1.4fr); gap: 2px 8px; }
+  .tx-value, .tx-link { grid-column: 3; justify-self: end; }
+  .tx-direction, .tx-row > div { grid-row: span 2; }
+}

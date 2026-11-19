@@ -78,5 +78,5 @@ export function renderApp(c: Ctx): Rendered {
     else if (r.modal === 'screen') modal = screenModal(c, r.id ?? 0);
     else modal = supplyModal(c, r.modal);
   }
-  return { screen, modal, wide: picking, title: `TapePool · ${title}` };
+  return { screen, modal, wide: picking, title: `TapePool | ${title}` };
 }

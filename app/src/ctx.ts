@@ -33,7 +33,7 @@ export function syncUi(ui: UiState, r: Route, snap: Snapshot): void {
 
 /** Everything a page needs, from the source and the screen state. */
 export function makeCtx(source: DataSource, ui: UiState, route: Route, inFrame: boolean): Ctx {
-  const snap = source.snapshot(route.view);
+  const snap = source.snapshot(route.view, route.page === 'dash');
   syncUi(ui, route, snap);
   const borrow = route.page === 'rig' || route.page === 'group' ? deriveBorrow(snap, ui, snap.now) : null;
   return { snap, ui, route, now: snap.now, borrow, link: linker(route.view), readOnly: inFrame ? 'frame' : route.view ? 'view' : null };
