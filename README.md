@@ -91,42 +91,42 @@ the pool shows whether new borrows are open.
 ```mermaid
 flowchart LR
   subgraph users["Who uses it"]
-    lender["Lender<br/>browser wallet"]
-    miner["Miner<br/>browser wallet, holds a RIG voucher"]
+    lender["Lender"]
+    miner["Miner<br/>holds a RIG voucher"]
   end
 
-  app["app.tapepool.io<br/>static web app, signs only<br/>through the user's wallet"]
+  app["app.tapepool.io<br/>static web app"]
 
   subgraph xl["X Layer"]
-    pool["TapePool<br/>BEM in, tpBEM out"]
-    agent["RigAgent<br/>one per borrower,<br/>holds the RIG voucher"]
-    policy["CreditPolicy<br/>policy circuit: TapeOut Circuits #1<br/>screen pass: RigScreen"]
-    receiver["RigFeedReceiver<br/>newest report per rig"]
+    pool["TapePool<br/>BEM / tpBEM"]
+    agent["RigAgent<br/>holds the voucher"]
+    policy["CreditPolicy<br/>+ policy circuit<br/>+ RigScreen"]
+    receiver["RigFeedReceiver"]
   end
 
-  keeper["Keeper and guardian<br/>off-chain, every 60 s"]
+  keeper["Keeper<br/>off-chain"]
 
-  subgraph bsc["BSC: TapeOut mining"]
+  subgraph bsc["BSC"]
     reporter["RigReporter"]
-    pod["PodMining and rig vault"]
+    pod["PodMining<br/>+ rig vault"]
   end
 
   lender -->|"deposit, withdraw"| app
-  miner -->|"borrow, repay, release"| app
-  app -->|"supply BEM, get tpBEM"| pool
-  app -->|"create agent, send voucher,<br/>borrow, repay, release"| agent
-  app -->|"share price, positions,<br/>report push requests"| keeper
+  miner -->|"borrow, repay"| app
+  app -->|"supply"| pool
+  app -->|"borrow, repay, release"| agent
+  app -->|"stats, push requests"| keeper
 
-  agent -->|"check each advance"| policy
-  policy -->|"reads the rig report"| receiver
-  agent -->|"lend: BEM advance to the miner<br/>repay: fee first, then principal"| pool
+  agent -->|"check"| policy
+  policy -->|"rig report"| receiver
+  agent -->|"lend, repay"| pool
 
-  keeper -->|"push rig reports"| reporter
-  reporter -->|"reads base power, status"| pod
-  reporter -->|"LayerZero message"| receiver
-  keeper -->|"harvest the loan's rigs"| pod
-  pod -->|"mined BEM over the BEM bridge,<br/>paid to the voucher holder"| agent
-  keeper -->|"sweep, flag impaired, seize"| agent
+  keeper -->|"push reports"| reporter
+  reporter -->|"reads"| pod
+  reporter -->|"LayerZero"| receiver
+  keeper -->|"harvest"| pod
+  pod -->|"mined BEM via bridge"| agent
+  keeper -->|"sweep, flag, seize"| agent
 ```
 
 How a loan runs:
