@@ -60,9 +60,6 @@ The two policy-circuit contracts run TapeOut's own code, made by the TapeOut fac
 publish. Each agent a borrower creates is a minimal proxy of the `RigAgent` implementation; explorers show it through
 the verified implementation.
 
-The BSC reporter has the same address as the retired 2026-10-21 pool on X Layer (the deployer made both at the same
-nonce on different chains). They are different contracts: always read the chain next to the address.
-
 Roles:
 
 | Role | Address | Powers |
@@ -89,24 +86,93 @@ Parameters, as read from the pool:
 Caps only block new deposits or new borrows; they never block repayments, sweeps or withdrawals. `borrowsPaused()` on
 the pool shows whether new borrows are open.
 
-Retired stacks (supply cap 0, borrows paused; holders can still withdraw, do not deposit): the pools
-`0xD54673E73448584E86C61f45203ab507F3F2c3eC` (2026-10-21, X Layer), `0xFD48226e11FCFF465033305574D87bCE004314BA`
-(2026-10-31) and `0x68c1D5e6f193cE5a5060BF7540Ae391cbC1939ca` (2026-11-02), and the rig feeds of 2026-10-21 (reporter
-`0xCdD7E66c51633255C944DDC43dAe7285a300f1B7`, receiver `0x8bd22956fdcfebA48dD37a4fB4c33b226273b4b6`) and 2026-10-31
-(reporter `0x24b5a7CA358Af29C51d16F801BbEcF746247AF0e`, receiver `0xB96847a3af4C9eC658cDC77dB98801AF399cFA1d`).
+## Architecture
 
-### External contracts Tape Pool reads or calls
+```mermaid
+flowchart TB
+  subgraph users["Who uses it"]
+    lender["Lender<br/>browser wallet"]
+    borrower["Miner (borrower)<br/>browser wallet, holds a RIG voucher"]
+    owner["Owner<br/>hand-signed wallet"]
+  end
 
-| What | Chain | Address |
-|---|---|---|
-| RIG voucher (ERC-721) | X Layer | `0x9cfc959cd42B2e1d39a0d850c528210E818AE520` |
-| BEM (OFT) | X Layer | `0x60e62Efa9405d6873C5deaBD4E6CC91c25363952` |
-| TapeOut factory | X Layer | `0x1f09DAeFA827f02CBb40967cc91b259763760761` |
-| LayerZero EndpointV2 | X Layer | `0x1a44076050125825900e736c501f859c50fE728c` |
-| PodMining | BSC | `0x7E2E0DC66a3bD9103E69b766afA62d9f7b697b46` |
-| Rig vault (`harvest`) | BSC | `0x48D43345656f0f9510dC3c06CBa99dFf597617C2` |
-| BEM token | BSC | `0x5ce033B2bFCa3Af30b3e8C8457DeaF776A8b695a` |
-| BEM OFT adapter | BSC | `0xa84B8D3893De6e9922f2B29bE1e1b115845F5E72` |
+  subgraph web["app.tapepool.io: static web app (TypeScript, Vite, viem)"]
+    app["Markets, Supply, Borrow,<br/>Dashboard and Rigs pages"]
+  end
+
+  subgraph ops["Off-chain services"]
+    keeper["Keeper and guardian<br/>one cycle every 60 s"]
+    api["Read API of the keeper<br/>GET /v1/stats, GET /v1/position<br/>POST /v1/push"]
+    tg["Telegram alerts<br/>to the owner"]
+    tool["Revocation screen tool<br/>screen/, run by the owner"]
+  end
+
+  subgraph xl["X Layer"]
+    pool["TapePool<br/>ERC-4626 vault, BEM in, tpBEM out"]
+    factory["AgentFactory"]
+    agent["RigAgent clone<br/>one per borrower, holds the vouchers"]
+    policy["CreditPolicy"]
+    circuit["Policy circuit<br/>TapeOut Circuits, circuit ID 1"]
+    receiver["RigFeedReceiver<br/>newest report per rig"]
+    screen["RigScreen<br/>screen passes"]
+    lens["TapeLens<br/>read-only quotes"]
+    voucher["RIG voucher<br/>TapeOut ERC-721"]
+  end
+
+  subgraph bsc["BSC"]
+    reporter["RigReporter"]
+    pod["PodMining and rig vault<br/>TapeOut"]
+  end
+
+  lender --> app
+  borrower --> app
+  app -->|"deposit, withdraw, redeem"| pool
+  app -->|"create an agent"| factory
+  app -->|"send the voucher to the agent"| voucher
+  app -->|"borrow, repay, sweep,<br/>release, claimLate"| agent
+  app -->|"how much can this agent borrow"| lens
+  app -->|"share price, positions,<br/>report push requests"| api
+  app -.->|"fallback, the user pays BNB:<br/>push a report"| reporter
+  app -.->|"optional, the user pays BNB:<br/>harvest"| pod
+
+  factory -->|"clones"| agent
+  agent -->|"borrow: check"| policy
+  policy -->|"eval, gas-capped STATICCALL"| circuit
+  policy -->|"latest report"| receiver
+  policy -->|"pass in effect?"| screen
+  policy -->|"ownerOf"| voucher
+  agent -->|"lend, repay: fee first, then principal;<br/>seized vouchers"| pool
+  pool -->|"BEM advance"| borrower
+
+  api --- keeper
+  keeper -->|"harvest the loan's rigs"| pod
+  keeper -->|"push rig reports"| reporter
+  keeper -->|"sweep, flag impaired, seize"| agent
+  keeper -->|"brakes: pause borrows, disable feed"| pool
+  keeper -->|"brake: suspend a pass"| screen
+  keeper --> tg
+
+  reporter -->|"reads base power, status, pending"| pod
+  reporter -->|"LayerZero message, up to 16 rigs"| receiver
+  pod -->|"harvested BEM over the BEM bridge"| voucher
+  voucher -->|"pays the holder: the agent"| agent
+
+  owner -->|"caps and fees within hard bounds;<br/>loosening waits 48 h"| pool
+  owner --> tool
+  tool -->|"checks every official vector"| pod
+  owner -->|"record the pass, 48 h delay"| screen
+```
+
+How a loan runs:
+
+1. The miner creates a `RigAgent`, sends it the RIG voucher and asks for an advance. The agent asks `CreditPolicy`,
+   which reads the rig's latest report, its screen pass and the voucher's holder, and evaluates the policy circuit. If
+   both the circuit and the Solidity mirror allow it, the pool sends the BEM advance to the miner.
+2. While the agent holds the voucher, the keeper harvests the rig on BSC. The harvested BEM crosses the BEM bridge and
+   is paid to the voucher's holder, the agent.
+3. The keeper (or anyone) calls `sweep`: the agent repays the pool, the fee first and then the principal, and sends
+   anything left to the miner. The miner can also repay by hand at any time.
+4. When the debt is zero, the miner takes the voucher back with `release`.
 
 ## How it works
 
@@ -146,8 +212,8 @@ npm ci --ignore-scripts
 VITE_NETWORK=redeploy npm run dev       # then open http://localhost:5173/#/app
 ```
 
-`VITE_NETWORK=redeploy` selects the live stack above; the default `mainnet` book still names the retired 2026-10-21
-stack. You can also put `VITE_NETWORK=redeploy` (and optionally `VITE_KEEPER_URL=<keeper base URL>`) in `app/.env.local`,
+`VITE_NETWORK=redeploy` selects the live stack above; the default `mainnet` book is an earlier stack, so always build
+with `redeploy`. You can also put `VITE_NETWORK=redeploy` (and optionally `VITE_KEEPER_URL=<keeper base URL>`) in `app/.env.local`,
 which is git-ignored.
 
 Production build: `VITE_NETWORK=redeploy npm run build` writes a static site to `app/dist/`. The hosted app at
@@ -177,21 +243,8 @@ sources on the explorers show the same settings.
 ## Security review
 
 [docs/security-audits/2026-11-05-redeploy-4-prescan.md](docs/security-audits/2026-11-05-redeploy-4-prescan.md) is the
-team's latest review of the deployed contracts and their deployment gates (a Vietnamese copy sits next to it). It was
-done by the Tape Pool team with AI-assisted scanning and triage, and it is not independent. After the hackathon we plan
-a third-party audit.
-
-## Risks
-
-Smart contracts carry risk: you can lose funds.
-
-- **Lenders:** a rig behind a loan can be revoked, stopped or rescued; the loan can then default, and lenders carry what the
-  loss reserve does not cover. Withdrawals use only idle BEM. Deposits stop while a loan is flagged. Everything is counted
-  in BEM.
-- **Borrowers:** a slow rig is never seized; a failed rig can be, after a 72-hour window to repay. Fees are not refunded.
-- **Trust:** the owner's changes wait in a public queue and no one can move pool funds or vouchers; the keeper holds only
-  the three brakes; TapeOut's multisig can upgrade the vouchers and the rig vault, or rescue a rig; LayerZero carries the
-  rig data.
+team's latest review of the deployed contracts and their deployment gates. It was done by the Tape Pool team with
+AI-assisted scanning and triage, and it is not independent. After the hackathon we plan a third-party audit.
 
 ## License
 
