@@ -92,75 +92,41 @@ the pool shows whether new borrows are open.
 flowchart TB
   subgraph users["Who uses it"]
     lender["Lender<br/>browser wallet"]
-    borrower["Miner (borrower)<br/>browser wallet, holds a RIG voucher"]
-    owner["Owner<br/>hand-signed wallet"]
+    miner["Miner<br/>browser wallet, holds a RIG voucher"]
   end
 
-  subgraph web["app.tapepool.io: static web app (TypeScript, Vite, viem)"]
-    app["Markets, Supply, Borrow,<br/>Dashboard and Rigs pages"]
-  end
-
-  subgraph ops["Off-chain services"]
-    keeper["Keeper and guardian<br/>one cycle every 60 s"]
-    api["Read API of the keeper<br/>GET /v1/stats, GET /v1/position<br/>POST /v1/push"]
-    tg["Telegram alerts<br/>to the owner"]
-    tool["Revocation screen tool<br/>screen/, run by the owner"]
-  end
+  app["app.tapepool.io<br/>static web app, signs only<br/>through the user's wallet"]
 
   subgraph xl["X Layer"]
-    pool["TapePool<br/>ERC-4626 vault, BEM in, tpBEM out"]
-    factory["AgentFactory"]
-    agent["RigAgent clone<br/>one per borrower, holds the vouchers"]
-    policy["CreditPolicy"]
-    circuit["Policy circuit<br/>TapeOut Circuits, circuit ID 1"]
+    pool["TapePool<br/>BEM in, tpBEM out"]
+    agent["RigAgent<br/>one per borrower,<br/>holds the RIG voucher"]
+    policy["CreditPolicy<br/>policy circuit: TapeOut Circuits #1<br/>screen pass: RigScreen"]
     receiver["RigFeedReceiver<br/>newest report per rig"]
-    screen["RigScreen<br/>screen passes"]
-    lens["TapeLens<br/>read-only quotes"]
-    voucher["RIG voucher<br/>TapeOut ERC-721"]
   end
 
-  subgraph bsc["BSC"]
+  keeper["Keeper and guardian<br/>off-chain, every 60 s"]
+
+  subgraph bsc["BSC: TapeOut mining"]
     reporter["RigReporter"]
-    pod["PodMining and rig vault<br/>TapeOut"]
+    pod["PodMining and rig vault"]
   end
 
-  lender --> app
-  borrower --> app
-  app -->|"deposit, withdraw, redeem"| pool
-  app -->|"create an agent"| factory
-  app -->|"send the voucher to the agent"| voucher
-  app -->|"borrow, repay, sweep,<br/>release, claimLate"| agent
-  app -->|"how much can this agent borrow"| lens
-  app -->|"share price, positions,<br/>report push requests"| api
-  app -.->|"fallback, the user pays BNB:<br/>push a report"| reporter
-  app -.->|"optional, the user pays BNB:<br/>harvest"| pod
+  lender -->|"deposit, withdraw"| app
+  miner -->|"borrow, repay, release"| app
+  app -->|"supply BEM, get tpBEM"| pool
+  app -->|"create agent, send voucher,<br/>borrow, repay, release"| agent
+  app -->|"share price, positions,<br/>report push requests"| keeper
 
-  factory -->|"clones"| agent
-  agent -->|"borrow: check"| policy
-  policy -->|"eval, gas-capped STATICCALL"| circuit
-  policy -->|"latest report"| receiver
-  policy -->|"pass in effect?"| screen
-  policy -->|"ownerOf"| voucher
-  agent -->|"lend, repay: fee first, then principal;<br/>seized vouchers"| pool
-  pool -->|"BEM advance"| borrower
+  agent -->|"check each advance"| policy
+  policy -->|"reads the rig report"| receiver
+  agent -->|"lend: BEM advance to the miner<br/>repay: fee first, then principal"| pool
 
-  api --- keeper
-  keeper -->|"harvest the loan's rigs"| pod
   keeper -->|"push rig reports"| reporter
+  reporter -->|"reads base power, status"| pod
+  reporter -->|"LayerZero message"| receiver
+  keeper -->|"harvest the loan's rigs"| pod
+  pod -->|"mined BEM over the BEM bridge,<br/>paid to the voucher holder"| agent
   keeper -->|"sweep, flag impaired, seize"| agent
-  keeper -->|"brakes: pause borrows, disable feed"| pool
-  keeper -->|"brake: suspend a pass"| screen
-  keeper --> tg
-
-  reporter -->|"reads base power, status, pending"| pod
-  reporter -->|"LayerZero message, up to 16 rigs"| receiver
-  pod -->|"harvested BEM over the BEM bridge"| voucher
-  voucher -->|"pays the holder: the agent"| agent
-
-  owner -->|"caps and fees within hard bounds;<br/>loosening waits 48 h"| pool
-  owner --> tool
-  tool -->|"checks every official vector"| pod
-  owner -->|"record the pass, 48 h delay"| screen
 ```
 
 How a loan runs:
