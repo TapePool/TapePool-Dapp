@@ -56,9 +56,13 @@ Every contract below that Tape Pool wrote has its source verified as an exact ma
 | Policy circuit: Circuits (ERC-721) | X Layer | [`0xdc76f123838b5398A173D215a2c8338Ad189C9a8`](https://www.oklink.com/x-layer/address/0xdc76f123838b5398A173D215a2c8338Ad189C9a8) | Processor "Tape Pool Policy" (TPPOL), made with the TapeOut factory; circuit ID 1 is the credit rule |
 | Policy circuit: transistors | X Layer | [`0x05264cF3862266165401d3961935D0D230bC8fd6`](https://www.oklink.com/x-layer/address/0x05264cF3862266165401d3961935D0D230bC8fd6) | The processor's transistors contract |
 
-The two policy-circuit contracts run TapeOut's own code, made by the TapeOut factory, so their source is TapeOut's to
-publish. Each agent a borrower creates is a minimal proxy of the `RigAgent` implementation; explorers show it through
-the verified implementation.
+The two policy-circuit contracts were created for Tape Pool by the TapeOut factory (our deployer's `createCPU` call,
+and the circuit #1 NFT is held by our deployer). Each is an OpenZeppelin `BeaconProxy`, verified on OKLink and as a
+match on Sourcify (the executable code matches; only the metadata differs, since it depends on the TapeOut project's
+file paths). The proxy delegates to TapeOut's beacon; the Circuits logic behind it, implementation
+[`0x977f217887E085D298Cb3819cDAD5A0ee35F29B2`](https://www.oklink.com/x-layer/address/0x977f217887E085D298Cb3819cDAD5A0ee35F29B2),
+shows its source on OKLink. Each agent a borrower creates is a minimal proxy of the `RigAgent` implementation; explorers
+show it through the verified implementation.
 
 Roles:
 
