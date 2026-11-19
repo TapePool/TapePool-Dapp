@@ -400,10 +400,11 @@ contract RigAgent is IERC721Receiver, ReentrancyGuard {
         emit ImpairmentFlagged(address(this), rigId, kind, l.impairedAt);
     }
 
-    /// @notice Clear an expired flag when the flagged rig is healthy and no collateral rig is impaired.
+    /// @notice Clear an expired flag when the flagged rig is healthy and no collateral rig is impaired or unknown.
     ///         For each rig the newest candidate at or after `seizeEvidenceFrom()` decides: a report
-    ///         under R3-00 row H (healthy), row B (impaired) or row U (unknown, which masks only
-    ///         health: an older power-0 record still blocks), or the voucher record under row VC.
+    ///         under R4-00 with R4-08: row H (healthy), row B (impaired), or row U or N (unknown,
+    ///         which masks only health: an older known power-0 record at or after that floor still
+    ///         blocks), or the voucher record under row VC.
     ///         Permissionless.
     function clearExpiredFlag() external nonReentrant {
         Loan storage l = _loan;
@@ -418,7 +419,7 @@ contract RigAgent is IERC721Receiver, ReentrancyGuard {
         uint256 n = _collateral.length;
         for (uint256 i; i < n; ++i) {
             uint8 verdict = _verdict(_collateral[i], from, f);
-            if (verdict == 2 || (_collateral[i] == rigId && verdict != 1)) revert NoHealthEvidence();
+            if (verdict >= 2 || (_collateral[i] == rigId && verdict != 1)) revert NoHealthEvidence();
         }
         _evidenceFloor = uint64(block.timestamp);
 
@@ -650,35 +651,35 @@ contract RigAgent is IERC721Receiver, ReentrancyGuard {
     }
 
     /// @dev The newest candidate reading of `id` against `floor`: 0 missing, 1 healthy, 2 impaired,
-    ///      per R3-00. Row H: a fresh, sane, healthy report with base(r), observed at or after the
-    ///      enable floor and `floor`. Row B: an impaired report with base(r) observed at or after
+    ///      3 unknown, per R4-00. Row H: a fresh, sane, healthy report with base(r), feed on, observed
+    ///      at or after the enable floor and `floor`. Row B: an impaired report with base(r) observed at or after
     ///      `floor`, of any age and without the enable floor (R3-05). Row U: a report with base(r) that
-    ///      is not impaired, observed at or after `floor` but below the enable floor, is a candidate of
-    ///      unknown verdict (0): a brake-time report may hide an impairment it overwrote. Row VC: a
-    ///      known voucher record synced at or after `floor`; power above 0 is healthy, power 0 impaired.
+    ///      is not impaired, observed at or after `floor` while disabled or below the enable floor,
+    ///      gives unknown (3): a brake-time report may hide an impairment it overwrote. Rows B and U
+    ///      apply with the feed off too. Row N: a non-impaired report at both floors, with feed on,
+    ///      that is stale or insane also gives unknown. Row VC: a known record synced at or after `floor`;
+    ///      power above 0 is healthy, power 0 impaired.
     ///      The newer candidate wins and impairment wins a timestamp tie. Unknown masks only health:
-    ///      over row U the record decides when synced after it, and a power-0 record decides at any
-    ///      `syncedAt` at or after `floor`; a positive record not newer than it leaves the rig missing.
+    ///      over row U or N the record decides when synced after it, and a power-0 record decides at any
+    ///      `syncedAt` at or after `floor`; a positive record not newer than it leaves the rig unknown.
     ///      No candidate means missing.
     function _verdict(uint256 id, uint256 floor, FeedState memory f) internal view returns (uint8 verdict) {
         bool reported;
         uint256 at;
-        if (!f.disabled) {
-            (RigReport memory r, bool ok) = _report(id);
-            if (ok && _base(r, id) && r.observedAt >= floor) {
-                if (_impaired(r)) {
-                    (verdict, reported, at) = (2, true, r.observedAt);
-                } else if (r.observedAt < f.enableFloor) {
-                    (verdict, reported, at) = (0, true, r.observedAt);
-                } else if (_fresh(r) && _sane(r)) {
-                    (verdict, reported, at) = (1, true, r.observedAt);
-                }
+        (RigReport memory r, bool ok) = _report(id);
+        if (ok && _base(r, id) && r.observedAt >= floor) {
+            if (_impaired(r)) {
+                (verdict, reported, at) = (2, true, r.observedAt);
+            } else if (f.disabled || r.observedAt < f.enableFloor || !_fresh(r) || !_sane(r)) {
+                (verdict, reported, at) = (3, true, r.observedAt);
+            } else {
+                (verdict, reported, at) = (1, true, r.observedAt);
             }
         }
         (bool known, uint64 syncedAt, uint256 power) = _voucherRecord(id);
         if (
             known && syncedAt >= floor
-                && (!reported || syncedAt > at || (syncedAt == at && power == 0) || (verdict == 0 && power == 0))
+                && (!reported || syncedAt > at || (syncedAt == at && power == 0) || (verdict == 3 && power == 0))
         ) {
             verdict = power == 0 ? 2 : 1;
         }

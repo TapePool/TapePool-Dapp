@@ -1,5 +1,5 @@
 import './trace.css';
-import { t } from '../../i18n';
+import { t } from '../i18n';
 import { Engine, earliest, money, payout, ROW, STEP, TICKS, WINDOW, type Quote, type Ticket } from './engine';
 import type { PriceFeed } from './feed';
 import { CELL, PLACEMENT_MS, RESULT_MS, Presentation, projectX, projectY, sampleAt, targetBounds, type Projection } from './presentation';

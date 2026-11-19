@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {TapePool} from "../../src/TapePool.sol";
 import {TapeLens} from "../../src/TapeLens.sol";
 import {RigAgent} from "../../src/RigAgent.sol";
@@ -10,11 +11,15 @@ import {CreditPolicy} from "../../src/CreditPolicy.sol";
 import {RigFeedReceiver} from "../../src/feed/RigFeedReceiver.sol";
 import {RigReporter} from "../../src/feed/RigReporter.sol";
 import {FeedLock} from "../../src/feed/FeedLock.sol";
-import {ILzEndpointSend} from "../../src/interfaces/ILayerZero.sol";
+import {ILzEndpointSend, MessagingParams} from "../../src/interfaces/ILayerZero.sol";
 import {Addresses as A} from "../Addresses.sol";
+import {CheckFeed} from "../feed/CheckFeed.s.sol";
+import {Miner} from "../../src/interfaces/IBsc.sol";
+import {RigReport} from "../../src/interfaces/IRigFeed.sol";
+import {BscRigReader} from "../../src/feed/BscRigReader.sol";
 
 /// @notice Read-only gates for the new stack, including both chains' feed configuration: `run` before
-///         the seed, `runSeeded` after it (SPEC-REDEPLOY-3 R3-07, RD3-04 and RD3-07).
+///         the seed, `runSeeded` after it (SPEC-REDEPLOY-4 R4-06, RD4-06 and RD4-09).
 contract CheckStack is Script {
     /// @notice The dead-seed holder and the least share balance it gets for 0.01 BEM at the launch
     ///         price (decimals offset 6).
@@ -26,23 +31,47 @@ contract CheckStack is Script {
         _run(poolAddress, lensAddress, reporterAddress, false);
     }
 
-    /// @notice The same checks after the seed (RD3-07), with the seeded state instead of the pre-seed gate.
+    /// @notice The same checks after the seed (RD4-09), with the seeded state instead of the pre-seed gate.
     function runSeeded(address poolAddress, address lensAddress, address reporterAddress) external {
         _run(poolAddress, lensAddress, reporterAddress, true);
     }
 
     function _run(address poolAddress, address lensAddress, address reporterAddress, bool seeded) internal {
+        require(poolAddress != address(0) && lensAddress != address(0), "stack not deployed");
+        require(reporterAddress != address(0), "feed not deployed");
+        require(reporterAddress == A.FEED_REPORTER_BSC_4, "not the redeploy 4 reporter");
+        require(
+            address(CreditPolicy(address(TapePool(poolAddress).policy())).feed()) == A.FEED_RECEIVER_XLAYER_4,
+            "not the redeploy 4 receiver"
+        );
+        checkOnForks(poolAddress, lensAddress, reporterAddress, vm.createFork("bsc"), seeded);
+    }
+
+    /// @notice The complete gate on an existing BSC fork, so locally deployed feed state is preserved.
+    function checkOnForks(
+        address poolAddress,
+        address lensAddress,
+        address reporterAddress,
+        uint256 bscFork,
+        bool seeded
+    ) public {
         require(block.chainid == A.XLAYER_CHAIN_ID, "X Layer only");
+        require(poolAddress != address(0) && lensAddress != address(0), "stack not deployed");
         TapePool pool = TapePool(poolAddress);
+        address receiverAddress = address(CreditPolicy(address(pool.policy())).feed());
+        require(
+            receiverAddress != A.FEED_RECEIVER_XLAYER && receiverAddress != A.FEED_RECEIVER_XLAYER_2
+                && reporterAddress != A.FEED_REPORTER_BSC && reporterAddress != A.FEED_REPORTER_BSC_2,
+            "retired feed"
+        );
         if (seeded) checkPoolSeeded(pool, TapeLens(lensAddress));
         else checkPool(pool, TapeLens(lensAddress));
-        checkReusedFeed(pool);
-        require(reporterAddress == A.FEED_REPORTER_BSC_2, "reused reporter");
-        address receiverAddress = address(CreditPolicy(address(pool.policy())).feed());
+        checkFeedPins(pool, receiverAddress, reporterAddress);
         RigFeedReceiver receiver = RigFeedReceiver(receiverAddress);
         ILzEndpointSend ep = ILzEndpointSend(A.ENDPOINT);
         require(receiver.srcEid() == A.BSC_EID && receiver.bemRef() == A.BEM_OFT_XLAYER, "receiver pins");
         require(address(receiver.endpoint()) == A.ENDPOINT && receiver.locked(), "receiver lock");
+        new CheckFeed().checkReceiver(receiverAddress, reporterAddress);
         require(receiver.peers(A.BSC_EID) == bytes32(uint256(uint160(reporterAddress))), "receiver peer");
         (address lib, bool isDefault) = ep.getReceiveLibrary(receiverAddress, A.BSC_EID);
         (address bemLib,) = ep.getReceiveLibrary(A.BEM_OFT_XLAYER, A.BSC_EID);
@@ -50,7 +79,8 @@ contract CheckStack is Script {
         FeedLock.requireMirrored(lib, receiverAddress, A.BEM_OFT_XLAYER, A.BSC_EID);
         console2.log("receiver / receive library", receiverAddress, lib);
         uint256 home = vm.activeFork();
-        vm.selectFork(vm.createFork("bsc"));
+        vm.selectFork(bscFork);
+        checkReporter(reporterAddress, receiverAddress);
         RigReporter reporter = RigReporter(reporterAddress);
         require(address(reporter.endpoint()) == A.ENDPOINT && reporter.locked(), "reporter lock");
         require(reporter.dstEid() == A.XLAYER_EID && reporter.bemRef() == A.BEM_ADAPTER_BSC, "reporter pins");
@@ -65,6 +95,52 @@ contract CheckStack is Script {
         console2.log("PASS: new stack pins, locks, roles, bounds and launch state");
     }
 
+    /// @notice Check the explicitly supplied deployment pair; zero placeholders cannot pass.
+    function checkFeedPins(TapePool pool, address receiver, address reporter) public view {
+        require(receiver != address(0) && reporter != address(0), "feed not deployed");
+        AgentFactory factory = AgentFactory(address(pool.factory()));
+        require(
+            address(CreditPolicy(address(pool.policy())).feed()) == receiver && address(factory.feed()) == receiver
+                && address(factory.implementation().feed()) == receiver,
+            "receiver pins"
+        );
+        require(RigFeedReceiver(receiver).locked(), "receiver lock");
+        require(RigFeedReceiver(receiver).peers(A.BSC_EID) == bytes32(uint256(uint160(reporter))), "receiver peer");
+    }
+
+    /// @notice BSC half of the gate, also callable on the rehearsal's existing persistent fork.
+    function checkReporter(address reporter, address receiver) public {
+        require(reporter != address(0) && receiver != address(0), "feed not deployed");
+        RigReporter rep = RigReporter(reporter);
+        require(address(rep.endpoint()) == A.ENDPOINT && rep.dstEid() == A.XLAYER_EID, "reporter endpoint");
+        require(rep.bemRef() == A.BEM_ADAPTER_BSC, "reporter BEM");
+        require(address(rep.vault()) == A.RIG_VAULT && address(rep.pod()) == A.POD_MINING, "BSC pins");
+        new CheckFeed().checkReporter(reporter, receiver);
+        RigReport memory r = readTapeOut(rep);
+        console2.log("TapeOut rig 5 / base", uint256(r.rigId), uint256(r.verifWeight - r.bonus));
+    }
+
+    /// @notice Read real TapeOut inputs pinned by the reporter and exercise its quote path. No packet is sent.
+    function readTapeOut(RigReporter reporter) public returns (RigReport memory r) {
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = 5;
+        (address circuits, uint256 id) = reporter.vault().rigs(5);
+        require(circuits == A.CPU_TAPEOUT, "TapeOut rig 5");
+        Miner memory m = reporter.pod().getMiner(reporter.pod().minerKey(circuits, id));
+        r = BscRigReader.read(reporter.vault(), reporter.pod(), 5);
+        require(
+            uint256(r.verifWeight) - r.bonus == Math.min(uint256(r.verifWeight), uint256(m.bstar) * m.mult),
+            "normalized TapeOut base"
+        );
+        RigReport[] memory reports = new RigReport[](1);
+        reports[0] = r;
+        MessagingParams memory params = MessagingParams(
+            A.XLAYER_EID, reporter.peers(A.XLAYER_EID), abi.encode(reports), reporter.options(1), false
+        );
+        vm.expectCall(A.ENDPOINT, abi.encodeCall(ILzEndpointSend.quote, (params, address(reporter))));
+        reporter.quote(ids);
+    }
+
     /// @notice Pre-seed gate: every pool launch value and wiring pin, and an empty pool; callable
     ///         against a local rehearsal.
     function checkPool(TapePool pool, TapeLens lens) public view {
@@ -75,7 +151,7 @@ contract CheckStack is Script {
         _log(pool, lens);
     }
 
-    /// @notice Post-seed variant (after RD3-07): the same launch values and pins, then the dead seed,
+    /// @notice Post-seed variant (after RD4-09): the same launch values and pins, then the dead seed,
     ///         the backstop's shares and no loan, mark or brake yet.
     function checkPoolSeeded(TapePool pool, TapeLens lens) public view {
         _checkLaunch(pool, lens);
@@ -87,21 +163,16 @@ contract CheckStack is Script {
         _log(pool, lens);
     }
 
-    /// @notice The reused feed (O3-4): the policy, the factory and the agent implementation all read
-    ///         the 2026-10-31 receiver, which is still locked and still peers the 2026-10-31 reporter.
+    /// @notice Historical redeploy 3 rehearsal entry point; the redeploy 4 gate never calls it.
     function checkReusedFeed(TapePool pool) public view {
         AgentFactory factory = AgentFactory(address(pool.factory()));
-        address receiver = address(CreditPolicy(address(pool.policy())).feed());
         require(
-            receiver == A.FEED_RECEIVER_XLAYER_2 && address(factory.feed()) == receiver
-                && address(factory.implementation().feed()) == receiver,
+            address(CreditPolicy(address(pool.policy())).feed()) == A.FEED_RECEIVER_XLAYER_2
+                && address(factory.feed()) == A.FEED_RECEIVER_XLAYER_2
+                && address(factory.implementation().feed()) == A.FEED_RECEIVER_XLAYER_2,
             "reused receiver"
         );
-        require(RigFeedReceiver(receiver).locked(), "receiver lock");
-        require(
-            RigFeedReceiver(receiver).peers(A.BSC_EID) == bytes32(uint256(uint160(A.FEED_REPORTER_BSC_2))),
-            "receiver peer"
-        );
+        checkFeedPins(pool, A.FEED_RECEIVER_XLAYER_2, A.FEED_REPORTER_BSC_2);
     }
 
     /// @dev Every launch value, bound and pin shared by both gates.
@@ -117,6 +188,7 @@ contract CheckStack is Script {
         require(pool.borrowsPaused() && !pool.feedDisabled() && !pool.policySwapQueued(), "launch brakes");
         require(address(pool.pendingPolicy()) == address(0) && pool.pendingPolicyEta() == 0, "pending policy");
         require(pool.asset() == A.BEM_OFT_XLAYER && factory.bem() == A.BEM_OFT_XLAYER, "BEM pins");
+        require(pool.decimals() == 14, "share decimals");
         require(factory.pool() == address(pool) && address(impl.pool()) == address(pool), "pool pins");
         require(address(factory.voucher()) == A.RIG_VOUCHER && address(impl.voucher()) == A.RIG_VOUCHER, "voucher pins");
         require(

@@ -18,21 +18,23 @@ describe('the address book', () => {
     }
   });
 
-  it.skipIf(claude === '')('matches the tables of CLAUDE.md, row by row', () => {
+  it.skipIf(claude === '')('matches the redeploy 4 tables of CLAUDE.md, row by row', () => {
+    expect(REDEPLOY).not.toBeNull();
     const rows: [string, RegExp, string][] = [
-      ['voucher', /RIG voucher \(UUPS proxy/, MAINNET.voucher],
-      ['bem', /\| BEM OFT \| X Layer/, MAINNET.bem],
-      ['pool', /`TapePool` \(tpBEM\)/, MAINNET.pool],
-      ['factory', /Tape Pool contracts\*\* \(deployed/, MAINNET.factory],
-      ['policy', /Tape Pool contracts\*\* \(deployed/, MAINNET.policy],
-      ['screen', /Tape Pool contracts\*\* \(deployed/, MAINNET.screen],
-      ['receiver', /Tape Pool rig data feed/, MAINNET.receiver],
-      ['reporter', /Tape Pool rig data feed/, MAINNET.reporter],
-      ['bscVault', /Rig vault \(`harvest\(ids\)`/, MAINNET.bscVault],
-      ['podMining', /PodMining \(sealed proxy\)/, MAINNET.podMining],
-      ['bemBsc', /\| BEM token \| BSC/, MAINNET.bemBsc],
-      ['bemAdapter', /\| BEM OFT adapter \| BSC/, MAINNET.bemAdapter],
-      ['implVoucher', /RIG voucher \(UUPS proxy/, MAINNET.implVoucher],
+      ['voucher', /RIG voucher \(UUPS proxy/, REDEPLOY!.voucher],
+      ['bem', /\| BEM OFT \| X Layer/, REDEPLOY!.bem],
+      ['pool', /`TapePool` \(tpBEM\)/, REDEPLOY!.pool],
+      ['factory', /Tape Pool contracts\*\* \(redeploy 4, deployed/, REDEPLOY!.factory],
+      ['policy', /Tape Pool contracts\*\* \(redeploy 4, deployed/, REDEPLOY!.policy],
+      ['screen', /Tape Pool contracts\*\* \(redeploy 4, deployed/, REDEPLOY!.screen],
+      ['lens', /Tape Pool contracts\*\* \(redeploy 4, deployed/, REDEPLOY!.lens!],
+      ['receiver', /Tape Pool rig data feed/, REDEPLOY!.receiver],
+      ['reporter', /Tape Pool rig data feed/, REDEPLOY!.reporter],
+      ['bscVault', /Rig vault \(`harvest\(ids\)`/, REDEPLOY!.bscVault],
+      ['podMining', /PodMining \(sealed proxy\)/, REDEPLOY!.podMining],
+      ['bemBsc', /\| BEM token \| BSC/, REDEPLOY!.bemBsc],
+      ['bemAdapter', /\| BEM OFT adapter \| BSC/, REDEPLOY!.bemAdapter],
+      ['implVoucher', /RIG voucher \(UUPS proxy/, REDEPLOY!.implVoucher],
     ];
     for (const [name, row, address] of rows) {
       const line = lineWith(row);
@@ -41,9 +43,33 @@ describe('the address book', () => {
     }
   });
 
-  it.skipIf(claude === '')('uses the deploy block CLAUDE.md gives for the pool, and Multicall3 where the keeper has it', () => {
-    expect(claude).toContain('blocks 73,824,866–73,824,872');
-    expect(MAINNET.poolDeployBlock).toBe(73_824_872n);
+  it('pins the legacy book independently and uses the redeploy blocks CLAUDE.md gives', () => {
+    expect(MAINNET).toEqual({
+      network: 'mainnet',
+      chainId: 196,
+      bscChainId: 56,
+      pool: '0xD54673E73448584E86C61f45203ab507F3F2c3eC',
+      factory: '0xC365a30740c17b93fE92581667A2d60bD4b92355',
+      policy: '0xBfE81f1e0D91e8D2C03ce4A015e9E096558f561D',
+      screen: '0xc336C0a710e99D5BD72417B35f0E70Cff063918C',
+      receiver: '0x8bd22956fdcfebA48dD37a4fB4c33b226273b4b6',
+      voucher: '0x9cfc959cd42B2e1d39a0d850c528210E818AE520',
+      bem: '0x60e62Efa9405d6873C5deaBD4E6CC91c25363952',
+      reporter: '0xCdD7E66c51633255C944DDC43dAe7285a300f1B7',
+      bscVault: '0x48D43345656f0f9510dC3c06CBa99dFf597617C2',
+      podMining: '0x7E2E0DC66a3bD9103E69b766afA62d9f7b697b46',
+      bemBsc: '0x5ce033B2bFCa3Af30b3e8C8457DeaF776A8b695a',
+      bemAdapter: '0xa84B8D3893De6e9922f2B29bE1e1b115845F5E72',
+      implVault: '0xeB3F0614e37d995a96fA41908de8D47A57F56463',
+      implVoucher: '0x66FB7d52C4931B48776D9019f88F7f58fB0d85E1',
+      multicall3: '0xcA11bde05977b3631167028862bE2a173976CA11',
+      poolDeployBlock: 73_824_872n,
+    });
+    if (claude !== '') expect(lineWith(/Tape Pool contracts\*\* \(redeploy 4, deployed/)).toContain('blocks 76,074,240–76,074,248');
+    expect(REDEPLOY!.factoryDeployBlock).toBe(76_074_244n);
+    expect(REDEPLOY!.poolDeployBlock).toBe(76_074_246n);
+    if (claude !== '') expect(lineWith(/Tape Pool rig data feed/)).toContain('block 133,949,050');
+    expect(REDEPLOY!.reporterDeployBlock).toBe(133_949_050n);
     const keeperAddresses = fs.readFileSync(path.join(REPO, 'keeper', 'src', 'addresses.ts'), 'utf8');
     expect(keeperAddresses).toContain(MAINNET.multicall3);
   });

@@ -1,9 +1,9 @@
 import { decodeFunctionData, parseAbi, parseEther, type Address, type Hex } from 'viem';
 import { ADDR } from '../../../keeper/src/addresses';
-import { OWNER, RELAY, RIG } from '../../../keeper/test/anvil/harness';
+import { GUARDIAN, OWNER, RELAY, RIG } from '../../../keeper/test/anvil/harness';
 import { bscVaultAbi, reporterAbi, rigAgentAbi, tapeLensAbi, tapePoolAbi } from '../../src/chain/abi';
 import { POOL_PARAMS } from '../../src/chain/map';
-import { bindingText } from '../../src/chain/errors';
+import { bindingText, errorText } from '../../src/chain/errors';
 import { setLang } from '../../src/i18n';
 import { borrowUi, loanOf, moveUi, openRig, ownerOfRig, refreshUi, releaseUi, repayUi, reuseAgentUi } from './flows';
 import { expect, test } from './fixtures';
@@ -144,6 +144,40 @@ export function registerRedeployScenarios(): void {
     }
     await s.as('xl', e2e.miner).writeContract({ address: agent, abi: rigAgentAbi, functionName: 'withdrawVoucher', args: [RIG_B] });
     expect(await ownerOfRig(e2e, RIG_B)).toBe(e2e.miner);
+    expect(m.problems).toEqual([]);
+  });
+
+  // The exact +359 and +360 boundary is in redeploy4Settling.test.ts; the live clock here makes it a margin.
+  test('6d. RC4-04: with a fresh report inside the settling window the borrow page names the wait, and opens after it', async ({ e2e, session }) => {
+    const { s } = e2e;
+    e2e.freshPushLimits();
+    const m = await session(e2e.miner);
+    await openRig(m);
+    await reuseAgentUi(m, await emptyAgent(e2e));
+    await moveUi(m);
+    const brake = parseAbi(['function disableFeed()', 'function enableFeed()', 'function feedEnabledAt() view returns (uint64)']);
+    await s.as('xl', GUARDIAN).writeContract({ address: s.d.pool, abi: brake, functionName: 'disableFeed' });
+    await s.as('xl', OWNER).writeContract({ address: s.d.pool, abi: brake, functionName: 'enableFeed' });
+    const enabledAt = Number(await s.xl.readContract({ address: s.d.pool, abi: brake, functionName: 'feedEnabledAt' }));
+    // The page offers no refresh while settling, so a report observed after the enable floor comes from a direct push.
+    await e2e.sync(enabledAt + 100);
+    await s.bscTest.setBalance({ address: e2e.miner, value: parseEther('10') });
+    const cost = await s.bsc.readContract({ address: s.d.reporter, abi: reporterAbi, functionName: 'quote', args: [[RIG]] });
+    await s.as('bsc', e2e.miner).writeContract({ address: s.d.reporter, abi: reporterAbi, functionName: 'push', args: [[RIG]], value: cost * 11n / 10n });
+    await expect.poll(async () => { await m.reread(); return m.text(); }, { timeout: 120_000 }).toContain('Report fresh');
+    const settling = errorText({ kind: 'revert', name: 'FeedSettling' });
+    await e2e.sync(enabledAt + 350);
+    await m.reread();
+    await expect(m.page.getByText('Report fresh')).toBeVisible();
+    await expect(m.page.getByText(settling).first()).toBeVisible();
+    await expect(m.page.getByText(errorText({ kind: 'quote', reason: 8 }))).toHaveCount(0);
+    await expect(m.page.locator('[data-a="borrow"]:enabled')).toHaveCount(0);
+    await e2e.sync(enabledAt + 361);
+    await m.reread();
+    await expect(m.page.getByText(settling)).toHaveCount(0);
+    await expect(m.page.locator('[data-a="borrow"]')).toBeEnabled();
+    await releaseUi(m);
+    expect(await ownerOfRig(e2e, RIG)).toBe(e2e.miner);
     expect(m.problems).toEqual([]);
   });
 }

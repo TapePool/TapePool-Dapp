@@ -1,10 +1,10 @@
 import { hourglassFrame, TERMINAL } from '../ascii';
 import { errorDetails, errorText } from '../chain/errors';
-import { explorerAddress } from '../config';
+import { DOCS_URL, explorerAddress, LANDING_URL, TWITTER_URL } from '../config';
 import { fd, shortAddr } from '../logic/format';
 import { EMPTY, html, raw, type Html } from '../html';
 import { getLang, t, th } from '../i18n';
-import { depositsClosed, feedSettling, poolBanner, stale } from '../logic/selectors';
+import { poolBanner, stale } from '../logic/selectors';
 import { cl, img, type Ctx } from './ui';
 import { accountMenu, USER_ICON } from './wallets';
 
@@ -16,8 +16,8 @@ const NAV: readonly [string, () => string][] = [
 
 export function header(c: Ctx, current: string): Html {
   const items = NAV.map(([path, label]) => html`<a href="${c.link(path ? `/${path}` : '')}"${current === path ? raw(' aria-current="page"') : EMPTY}>${label()}</a>`);
-  // Tape is an ordinary route of this app in development: a hash link keeps the document, wallet and game session.
-  if (import.meta.env.DEV) items.push(html`<a data-local-tape href="${c.link('/tape')}"${current === 'tape' ? raw(' aria-current="page"') : EMPTY}>Tape</a>`);
+  // Tape is an ordinary route of this app: a hash link keeps the document, wallet and game session.
+  items.push(html`<a data-local-tape href="${c.link('/tape')}"${current === 'tape' ? raw(' aria-current="page"') : EMPTY}>Tape</a>`);
   const w = c.snap.wallet;
   const lang = getLang();
   const noWalletButtons = c.readOnly === 'frame';
@@ -38,24 +38,16 @@ export function header(c: Ctx, current: string): Html {
       : accountMenu(c);
   }
   const lng = html`<span class="lng" role="group" aria-label="Language"><button type="button" data-a="lang" data-v="en" aria-pressed="${String(lang === 'en')}">EN</button><button type="button" data-a="lang" data-v="cn" lang="zh-CN" aria-pressed="${String(lang === 'cn')}">中文</button></span>`;
-  return html`<header class="v2-hd"${import.meta.env.DEV ? raw(' data-local-nav') : EMPTY}><a class="logo" href="${c.link()}" aria-label="TapePool home">${img('logo', 'logo-img')}</a><nav class="v2-nav" aria-label="App">${items}</nav><div class="right">${lng}${net}${who}</div></header>`;
+  return html`<header class="v2-hd" data-local-nav><a class="logo" href="${c.link()}" aria-label="TapePool home">${img('logo', 'logo-img')}</a><nav class="v2-nav" aria-label="App">${items}</nav><div class="right">${lng}${net}${who}</div></header>`;
 }
 
 export function footer(c: Ctx): Html {
-  const p = c.snap.pool;
-  const dot = (cls: 'g' | 'y' | 'r' | 'n', label: string): Html => html`<span class="dot"><i class="dot-${cls}"></i>${label}</span>`;
-  if (import.meta.env.DEV && c.route.page === 'trace') return html`<footer class="v2-ft"><span class="dot"><i class="dot-g"></i>${t('Demo with virtual BEM', '虚拟 BEM 演示')}</span><span class="built"><span>${t('Built on', '构建于')}</span>${img('tapeout')}<span class="c-soft">TapeOut</span><span aria-hidden="true">·</span>${img('xlayer')}<span class="c-soft">X Layer</span><span aria-hidden="true">·</span>${img('fabx')}<span class="c-soft">FabX</span></span></footer>`;
-  const swap = p.pendingPolicy;
-  const closed = depositsClosed(p);
-  return html`<footer class="v2-ft" aria-label="${t('Pool status', '资金池状态')}">${[
-    p.borrowsPaused
-      ? dot('r', t('Borrows paused', '借款已暂停'))
-      : feedSettling(p, c.snap.now)
-        ? dot('y', t('Borrows reopen in a few minutes', '借款将在几分钟后恢复')) // RC3-02: lend waits FEED_SETTLE
-        : dot('g', t('Borrows open', '借款开放')),
-    dot(p.feedDisabled ? 'r' : 'g', p.feedDisabled ? t('Rig data feed off', '矿机数据源已关闭') : t('Rig data feed on', '矿机数据源已开启')),
-    dot(swap ? 'y' : 'n', swap ? t(`New credit rule queued · ${fd(swap.eta)}`, `新信用规则排队中 · ${fd(swap.eta)}生效`) : t('No credit rule change queued', '信用规则无待生效变更')),
-    dot(closed ? 'y' : 'g', closed ? t('Deposits closed · a loan is under review', '存款暂停 · 有贷款待处理') : t('Deposits open', '存款开放')),
+  if (c.route.page === 'trace') return html`<footer class="v2-ft"><span class="dot"><i class="dot-g"></i>${t('Demo with virtual BEM', '虚拟 BEM 演示')}</span><span class="built"><span>${t('Built on', '构建于')}</span>${img('tapeout')}<span class="c-soft">TapeOut</span><span aria-hidden="true">·</span>${img('xlayer')}<span class="c-soft">X Layer</span><span aria-hidden="true">·</span>${img('fabx')}<span class="c-soft">FabX</span></span></footer>`;
+  const ext = (href: string, label: string): Html => html`<a class="ft-link" href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  return html`<footer class="v2-ft">${[
+    ext(LANDING_URL, 'Landing'),
+    ext(DOCS_URL, 'Documentation'),
+    ext(TWITTER_URL, 'Twitter/X'),
   ]}<span class="built"><span>${t('Built on', '构建于')}</span>${img('tapeout')}<span class="c-soft">TapeOut</span><span aria-hidden="true">·</span>${img('xlayer')}<span class="c-soft">X Layer</span><span aria-hidden="true">·</span>${img('fabx')}<span class="c-soft">FabX</span></span></footer>`;
 }
 

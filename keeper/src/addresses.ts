@@ -47,12 +47,11 @@ export const SLOT = {
 /**
  * Our own contracts. Filled when they are deployed (feed in Phase 3, pool in Phase 6).
  *
- * The redeploy address book is the `KEEPER_*` environment of `loadDeployment` (config.ts). Redeploy 3
- * (SPEC-REDEPLOY-3 RB3-05) fills it after RD3-04 with the new `KEEPER_POOL`, `KEEPER_FACTORY`, `KEEPER_SCREEN`,
- * `KEEPER_LENS`, `KEEPER_POOL_DEPLOY_BLOCK` and `KEEPER_FACTORY_DEPLOY_BLOCK`, and keeps the reused feed:
- * `KEEPER_RECEIVER`, `KEEPER_REPORTER` and their deploy blocks stay the 2026-10-31 values. The keeper never
- * calls the credit policy, so it has no policy address. A non-legacy deployment must be a redeploy 3 pool
- * (`checkStack` in reads.ts); this build cannot serve the 2026-10-31 pool, which has no `feedEnabledAt`.
+ * The redeploy address book is the `KEEPER_*` environment of `loadDeployment` (config.ts). Redeploy 4
+ * (SPEC-REDEPLOY-4 RB4-03) replaces pool, factory, screen, lens, receiver and reporter together, with their four
+ * deployment blocks and a new state path. The keeper reads `pool.policy()`; there is no policy environment key.
+ * The non-legacy `checkStack` interface guard is retained; reviewed bytecode and feed pins are deploy gates.
+ * See keeper/README.md for the dry-mode drain of the old transaction journal before cutover.
  */
 export interface Deployment {
   /** Only the existing mainnet stack uses the legacy evidence/accounting rules. */

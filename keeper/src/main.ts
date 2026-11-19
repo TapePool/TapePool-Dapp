@@ -1,15 +1,17 @@
 // Keeper entry point (SPEC-PHASE3-KEEPER §2). One loop every 60 s; dry mode unless KEEPER_MODE=live.
 import { parseGwei } from "viem";
 import { bnbSpent } from "./logic/budget.js";
+import { recordHarvestReceipt } from "./logic/harvestLanding.js";
 import { Alerts } from "./alerts.js";
 import { makeClients } from "./chains.js";
 import { loadConfig } from "./config.js";
+import { deploymentStatus, withDeploymentStatus } from "./deploymentStatus.js";
 import { startHttp } from "./http.js";
 import { Keeper } from "./keeper.js";
 import { log, redact, registerSecrets } from "./log.js";
 import { PushLimiter } from "./logic/pushLimits.js";
 import { PushService } from "./push.js";
-import { checkStack } from "./reads.js";
+import { checkStack, readPolicy } from "./reads.js";
 import { loadState, saveState } from "./state.js";
 import { Sender } from "./tx.js";
 
@@ -24,14 +26,16 @@ async function main(): Promise<void> {
   const alerts = new Alerts(cfg.telegramToken, cfg.telegramChatId, `[keeper ${cfg.mode}]`);
   const alert = (text: string) => void alerts.send(`tx:${text}`, text);
   const deployment = cfg.deployment;
-  // this build mirrors the redeploy 3 evidence rules: refuse to start against any other non-legacy pool (RB3-05)
+  // Retain the non-legacy interface guard; deploy gates establish the reviewed redeploy 4 bytecode (RB4-03).
   if (deployment) await checkStack(clients, deployment);
+  const policy = deployment ? await readPolicy(clients, deployment) : null;
   const state = loadState(cfg.statePath, deployment?.factoryDeployBlock ?? 0n, deployment?.factory ?? "");
   state.spendStartedAt ||= Math.floor(Date.now() / 1000);
   const persist = () => saveState(cfg.statePath, state);
   const senders = {
     bsc: new Sender(clients.bsc, { mode: cfg.mode, capWei: parseGwei("3"), stuckAfterSec: 180, alert, journal: state.pendingTx.bsc, persist,
-      mined: (call, receipt) => {
+      mined: (call, receipt, sentAt) => {
+        recordHarvestReceipt(state.harvestLandings, call, receipt, sentAt);
         const amount = bnbSpent(call, receipt);
         if (amount !== null) state.spend.push({ at: Math.floor(Date.now() / 1000), amount: amount.toString() });
       },
@@ -66,8 +70,9 @@ async function main(): Promise<void> {
       logCursor: keeper.state.cursor,
       agents: Object.keys(keeper.state.agents).length,
       keeper: clients.account.address,
+      ...deploymentStatus(deployment, policy),
     }),
-    keeper.publicData ?? undefined, // the app's read-only routes (SPEC-PHASE5-APP §8)
+    keeper.publicData && deployment && policy ? withDeploymentStatus(keeper.publicData, deployment, policy) : undefined,
   );
 
   log("info", "keeper started", { mode: cfg.mode, keeper: clients.account.address, deployed: deployment !== null });

@@ -117,6 +117,8 @@ contract TapePool is ERC4626, Ownable2Step, ReentrancyGuard, ITapePool {
     uint64 public vestEnd;
     mapping(address agent => uint256) public absorbedOf;
     mapping(address agent => uint32) internal _reserveTerms;
+    /// @notice Lender assets when the agent's open loan began; the base of its reserve cap. 0 with no open loan.
+    mapping(address agent => uint256) public reserveBaseOf;
     uint256 public outstandingPrincipal;
     /// @notice Remaining principal of every loan with an impairment mark.
     uint256 public doubtful;
@@ -333,6 +335,7 @@ contract TapePool is ERC4626, Ownable2Step, ReentrancyGuard, ITapePool {
             revert ExceedsBackstop();
         }
         _reserveTerms[msg.sender] = uint32(reserveShareBps) | (uint32(reserveCapBps) << 16);
+        reserveBaseOf[msg.sender] = totalAssets();
 
         outstandingPrincipal += principal;
         principalOf[borrower] += principal;
@@ -350,10 +353,10 @@ contract TapePool is ERC4626, Ownable2Step, ReentrancyGuard, ITapePool {
         address borrower = _agentBorrower();
         if (principalPart > loanPrincipalOf[msg.sender]) revert RepayExceedsPrincipal();
 
-        // reserve share, capped against totalAssets measured before this payment is credited
+        // reserve share, capped against the lender assets stored when this loan began
         (uint16 shareBps, uint16 capBps) = loanReserveTerms(msg.sender);
         uint256 toReserve = feePart * shareBps / BPS;
-        uint256 reserveCap = totalAssets() * capBps / BPS;
+        uint256 reserveCap = reserveBaseOf[msg.sender] * capBps / BPS;
         uint256 room = reserveCap > reserve ? reserveCap - reserve : 0;
         if (toReserve > room) toReserve = room;
 
@@ -368,7 +371,10 @@ contract TapePool is ERC4626, Ownable2Step, ReentrancyGuard, ITapePool {
             doubtful -= cut;
             _restore(msg.sender, cut);
         }
-        if (loanPrincipalOf[msg.sender] == 0) delete _reserveTerms[msg.sender];
+        if (loanPrincipalOf[msg.sender] == 0) {
+            delete _reserveTerms[msg.sender];
+            delete reserveBaseOf[msg.sender];
+        }
 
         IERC20(asset()).safeTransferFrom(msg.sender, address(this), feePart + principalPart);
         tracked += feePart + principalPart;
@@ -413,6 +419,7 @@ contract TapePool is ERC4626, Ownable2Step, ReentrancyGuard, ITapePool {
         reserve -= cover;
         delete absorbedOf[msg.sender];
         delete _reserveTerms[msg.sender];
+        delete reserveBaseOf[msg.sender];
         emit WrittenOff(msg.sender, amount, cover);
     }
 
@@ -551,9 +558,10 @@ contract TapePool is ERC4626, Ownable2Step, ReentrancyGuard, ITapePool {
         }
     }
 
-    /// @notice Trust feed reports again. Owner only. Every earlier flag gets at least
-    ///         `EVIDENCE_WINDOW` of seize time from now (SPEC §10.5). Records `feedEnabledAt`: reports
-    ///         observed before it plus clock skew stay unusable, and `lend` waits `FEED_SETTLE` (R3-01).
+    /// @notice Trust feed reports again. Owner only. A flag live at the brake gets at least
+    ///         `EVIDENCE_WINDOW` of seize time from now; an expired flag stays expired (SPEC §10.5).
+    ///         Records `feedEnabledAt`: reports observed before it plus clock skew stay unusable,
+    ///         and `lend` waits `FEED_SETTLE` (R3-01).
     function enableFeed() external onlyOwner nonReentrant checkpoint {
         if (!feedDisabled) revert FeedNotDisabled();
         feedDisabled = false;

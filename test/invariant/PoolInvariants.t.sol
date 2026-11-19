@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {console} from "forge-std/console.sol";
 import {Base} from "../unit/Base.t.sol";
 import {RigAgent} from "../../src/RigAgent.sol";
+import {MockVoucher} from "../mocks/Mocks.sol";
 import {PoolHandler, RedeployHandler} from "./PoolHandler.sol";
 
 /// Stateful invariants for the pool, the agent factory and the agents (SPEC §15), on the mocks.
@@ -14,7 +15,7 @@ import {PoolHandler, RedeployHandler} from "./PoolHandler.sol";
 /// by `_handlerClean`.
 ///
 /// Campaign size comes from `[invariant]` in foundry.toml (64 runs x 200 calls). For a deeper pass
-/// before a deploy: `FOUNDRY_INVARIANT_RUNS=256 FOUNDRY_INVARIANT_DEPTH=250 forge test --match-path
+/// before a deploy: `FOUNDRY_INVARIANT_RUNS=256 FOUNDRY_INVARIANT_DEPTH=400 forge test --match-path
 /// "test/invariant/*" --match-test invariant_`.
 ///
 /// Not covered here, on purpose:
@@ -32,7 +33,7 @@ contract PoolInvariants is Base {
         _deposit(lp, 10 * BEM);
         handler = new PoolHandler(bem, voucher, feed, factory, pool, owner, guardian);
 
-        bytes4[] memory s = new bytes4[](38);
+        bytes4[] memory s = new bytes4[](42);
         uint256 i;
         s[i++] = PoolHandler.deposit.selector;
         s[i++] = PoolHandler.mint.selector;
@@ -49,13 +50,17 @@ contract PoolInvariants is Base {
         s[i++] = PoolHandler.release.selector;
         s[i++] = PoolHandler.withdrawVoucher.selector;
         s[i++] = PoolHandler.borrow.selector;
+        s[i++] = PoolHandler.openLoan.selector;
         s[i++] = PoolHandler.harvest.selector;
         s[i++] = PoolHandler.sweep.selector;
         s[i++] = PoolHandler.repay.selector;
+        s[i++] = PoolHandler.bindReserveCap.selector;
         s[i++] = PoolHandler.claimLate.selector;
         s[i++] = PoolHandler.impair.selector;
         s[i++] = PoolHandler.flagImpaired.selector;
         s[i++] = PoolHandler.clearExpiredFlag.selector;
+        s[i++] = PoolHandler.expireBrakeClear.selector;
+        s[i++] = PoolHandler.expireRowNClear.selector;
         s[i++] = PoolHandler.warpToSeizeWindow.selector;
         s[i++] = PoolHandler.seize.selector;
         s[i++] = PoolHandler.seizeJustBefore.selector;
@@ -101,6 +106,7 @@ contract PoolInvariants is Base {
             RigAgent.LoanView memory v = a.loanOf();
             uint256 poolSide = pool.loanPrincipalOf(address(a));
             uint256 dbt = pool.doubtfulOf(address(a));
+            assertEq(pool.reserveBaseOf(address(a)), v.open ? handler.loanBase(address(a)) : 0);
             if (v.open) {
                 assertEq(poolSide, v.principal, "pool and agent disagree on remaining principal");
                 assertEq(dbt, v.doubtful ? v.principal : 0, "doubtful is not the flagged remaining principal");
@@ -183,7 +189,8 @@ contract PoolInvariants is Base {
     }
 
     /// One invariant, so the whole campaign runs once instead of once per check.
-    function invariant_poolAndAgents() public view {
+    function invariant_poolAndAgents() public {
+        handler.checkStoredReportBlocks();
         _handlerClean();
         _books();
         _collateral();
@@ -200,6 +207,15 @@ contract PoolInvariants is Base {
     }
 
     function afterInvariant() public view {
+        (uint256 flaggedB, uint256 otherB, uint256 otherU) = handler.reportBlockCounts();
+        console.log("R4-03 brake flagged B", flaggedB);
+        console.log("R4-03 brake other B", otherB);
+        console.log("R4-03 brake other U", otherU);
+        (uint256 flaggedN, uint256 otherN) = handler.rowNBlockCounts();
+        console.log("R4-08 flagged N", flaggedN);
+        console.log("R4-08 other N", otherN);
+        console.log("R4-04 binding reserve payments", handler.reserveBindingCount());
+        console.log("R4-07 runs with a loan", handler.loanRunCount());
         for (uint256 i; i < handler.hitLabelCount(); ++i) {
             string memory label = handler.hitLabelAt(i);
             console.log(label, handler.hitsOf(label));
@@ -240,6 +256,126 @@ contract PoolInvariants is Base {
         handler.sweep(0);
         assertFalse(a.hasLoan(), "a full sweep did not close the loan");
         assertEq(pool.outstandingPrincipal(), 0);
+        _clean();
+    }
+
+    function test_R4_07_openLoanRestoresOneStepAtATimeAndCountsAClosedLoan() public {
+        handler.guardianPause();
+        handler.guardianDisableFeed();
+        handler.openLoan();
+        assertFalse(pool.borrowsPaused());
+        assertTrue(pool.feedDisabled());
+        assertEq(handler.agentCount(), 0);
+        handler.openLoan();
+        assertFalse(pool.feedDisabled());
+        assertEq(handler.agentCount(), 0);
+        handler.openLoan(); // wait out settling
+        assertEq(block.timestamp, uint256(pool.feedEnabledAt()) + 360);
+        assertEq(handler.agentCount(), 0);
+        handler.openLoan(); // first rig
+        assertEq(handler.agentAt(0).collateralOf().length, 1);
+        assertFalse(handler.agentAt(0).hasLoan());
+        handler.openLoan(); // second rig
+        assertEq(handler.agentAt(0).collateralOf().length, 2);
+        assertFalse(handler.agentAt(0).hasLoan());
+        handler.openLoan(); // borrow alone
+        assertTrue(handler.agentAt(0).hasLoan());
+        assertTrue(handler.openedLoan());
+        assertEq(handler.loanRunCount(), 1);
+        handler.harvest(0, 4 * BEM);
+        handler.sweep(0);
+        assertFalse(handler.agentAt(0).hasLoan());
+        handler.openLoan(); // another borrow is still one sequence with a loan
+        assertTrue(handler.agentAt(0).hasLoan());
+        assertEq(handler.loanRunCount(), 1);
+        _clean();
+    }
+
+    function test_R4_07_openLoanDoesNotOnboardWithAGasBurningVoucher() public {
+        voucher.setMode(MockVoucher.Mode.BurnGas);
+        handler.openLoan{gas: 3_000_000}();
+        assertEq(handler.agentCount(), 0);
+        assertFalse(handler.openedLoan());
+        _clean();
+    }
+
+    function _prepareBrakeLoan() internal {
+        handler.expireBrakeClear(0, 0); // one rig and agent
+        assertFalse(handler.agentAt(0).hasLoan());
+        assertEq(handler.agentAt(0).collateralOf().length, 1);
+        handler.expireBrakeClear(0, 0); // second rig, still no borrow in this call
+        assertFalse(handler.agentAt(0).hasLoan());
+        assertEq(handler.agentAt(0).collateralOf().length, 2);
+        handler.expireBrakeClear(0, 0); // only borrow
+        assertTrue(handler.agentAt(0).hasLoan());
+        assertEq(handler.agentAt(0).loanOf().impairedAt, 0);
+    }
+
+    function test_R4_03_scriptedExpiredBrakeBlocksHaveIndependentCoverage() public {
+        _prepareBrakeLoan();
+        handler.expireBrakeClear(0, 0);
+        assertGt(handler.brakeFlaggedB(), 0);
+        handler.expireBrakeClear(0, 1);
+        assertGt(handler.brakeOtherB(), 0);
+        handler.expireBrakeClear(0, 2);
+        assertGt(handler.brakeOtherU(), 0);
+        assertGt(pool.doubtful(), 0);
+        _clean();
+    }
+
+    function test_R4_03_scriptedUnreadableVoucherKeepsTheIndependentReportBlock() public {
+        _prepareBrakeLoan();
+        handler.expireBrakeClear(0, 0);
+        uint256 before = handler.brakeFlaggedB();
+        voucher.setBadRigs(true);
+        handler.checkStoredReportBlocks();
+        assertGt(handler.brakeFlaggedB(), before);
+        assertGt(pool.doubtful(), 0);
+        _clean();
+    }
+
+    function test_R4_03_burningVoucherCannotDrainCompositeLoanPreparation() public {
+        handler.bootstrap(0, 0, 100);
+        handler.bootstrap(0, 0, 100);
+        handler.newRig(1, 2, 100); // a different borrower has a rig that bootstrap would try to transfer
+        handler.makeAgent(1, 0);
+        voucher.setMode(MockVoucher.Mode.BurnGas);
+        handler.expireBrakeClear{gas: 3_000_000}(1, 0);
+        assertTrue(handler.agentAt(0).hasLoan(), "prepared loan still opens without onboarding transfers");
+        assertEq(handler.agentAt(0).loanOf().impairedAt, 0, "preparation returns after borrow");
+        assertEq(voucher.ownerOf(3), handler.borrowerAt(1));
+        _clean();
+    }
+
+    function test_R4_03_burningVoucherDoesNotStartOnboarding() public {
+        handler.newRig(0, 0, 100);
+        handler.makeAgent(0, 0);
+        voucher.setMode(MockVoucher.Mode.BurnGas);
+        handler.expireBrakeClear{gas: 3_000_000}(0, 0);
+        assertEq(handler.agentAt(0).collateralOf().length, 0);
+        assertEq(voucher.ownerOf(1), handler.borrowerAt(0));
+        assertEq(handler.brakeFlaggedB(), 0);
+        _clean();
+    }
+
+    function test_R4_08_scriptedStaleAndInsaneOverwriteHaveIndependentCoverage() public {
+        _prepareBrakeLoan();
+        for (uint256 scenario; scenario < 4; ++scenario) {
+            uint256 before = scenario % 2 == 0 ? handler.rowNFlagged() : handler.rowNOther();
+            handler.expireRowNClear(0, scenario);
+            assertGt(scenario % 2 == 0 ? handler.rowNFlagged() : handler.rowNOther(), before);
+            assertGt(pool.doubtful(), 0);
+            _clean();
+        }
+    }
+
+    function test_R4_08_unreadableRecordStillLeavesIndependentRowNBlock() public {
+        _prepareBrakeLoan();
+        handler.expireRowNClear(0, 1);
+        uint256 before = handler.rowNOther();
+        voucher.setBadRigs(true);
+        handler.checkStoredReportBlocks();
+        assertGt(handler.rowNOther(), before);
         _clean();
     }
 
@@ -312,6 +448,18 @@ contract PoolInvariants is Base {
         handler.harvest(0, 4 * BEM);
         handler.sweep(0);
         assertEq(pool.reserve(), 0, "the reserve grew past its cap");
+        _clean();
+    }
+
+    function test_R4_04_handlerMakesAPositiveReserveCapBind() public {
+        for (uint256 i; i < 6; ++i) {
+            handler.bindReserveCap(0);
+        }
+        RigAgent a = handler.agentAt(0);
+        assertTrue(a.hasLoan());
+        assertGt(handler.bindingReservePayments(), 0);
+        assertEq(pool.reserve(), handler.loanBase(address(a)) / 10_000);
+        assertEq(pool.reserveBaseOf(address(a)), handler.loanBase(address(a)));
         _clean();
     }
 

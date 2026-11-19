@@ -1,6 +1,6 @@
 // Chain reads, batched through Multicall3 (SPEC-PHASE3-KEEPER §3). BSC state is read at the finalized
 // block. Every read that can fail returns null or a "not ok" record instead of throwing.
-import { encodePacked, getAddress, keccak256, type Address, type Hex } from "viem";
+import { encodePacked, getAddress, isAddress, keccak256, parseAbi, zeroAddress, type Address, type Hex } from "viem";
 import { ADDR, EXPECTED_IMPL, SLOT, type Deployment } from "./addresses.js";
 import {
   agentAbi,
@@ -30,9 +30,8 @@ async function safe<T>(p: Promise<T>): Promise<T | null> {
 }
 
 /**
- * A non-legacy deployment must be a redeploy 3 pool (SPEC-REDEPLOY-3 RB3-05): `FEED_SETTLE()` reads 360 and
- * `feedEnabledAt()` answers. Throws otherwise, so the keeper does not start against a pool whose evidence rules
- * this build does not mirror.
+ * Retain the non-legacy interface guard (SPEC-REDEPLOY-3 RB3-05): `FEED_SETTLE()` reads 360 and
+ * `feedEnabledAt()` answers. Redeploy 4 bytecode and feed pins are established by its deploy gates (RB4-03).
  */
 export async function checkStack(c: Clients, d: Deployment): Promise<void> {
   if (d.legacy) return;
@@ -42,6 +41,13 @@ export async function checkStack(c: Clients, d: Deployment): Promise<void> {
     x.readContract({ address: d.pool, abi: poolAbi, functionName: "feedEnabledAt" }),
   ]);
   if (settle !== BigInt(FEED_SETTLE)) throw new Error(`pool ${d.pool} is not a redeploy 3 pool: FEED_SETTLE ${settle}`);
+}
+
+/** RB4-03: the pool selects its policy; it is never an independent environment address. */
+export async function readPolicy(c: Clients, d: Deployment): Promise<Address> {
+  const policy = await c.xlayer.public.readContract({ address: d.pool, abi: poolAbi, functionName: "policy" });
+  if (typeof policy !== "string" || !isAddress(policy) || policy === zeroAddress) throw new Error(`pool ${d.pool} returned an invalid policy`);
+  return getAddress(policy);
 }
 
 /** The finalized BSC block number. */
@@ -203,6 +209,19 @@ export interface BscRig {
 export const minerKey = (circuits: Address, circuitId: bigint): Hex =>
   keccak256(encodePacked(["address", "uint256"], [circuits, circuitId]));
 
+/** R4-01: convert only raw miner fields at ingestion; stored reports already carry weight units. */
+export function bonusWeight(m: { verifWeight: bigint; bstar: bigint; mult: number }): bigint {
+  const base = m.bstar * BigInt(m.mult);
+  return base < m.verifWeight ? m.verifWeight - base : 0n;
+}
+
+// Keep the whole return word: an address decoder would discard malformed high bits.
+const custodyOwnerAbi = parseAbi(["function ownerOf(uint256) view returns (uint256)"]);
+const custodyOwner = (value: unknown): Address | null => {
+  if (typeof value === "bigint") return value > 0n && value < (1n << 160n) ? getAddress(`0x${value.toString(16).padStart(40, "0")}`) : null;
+  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value) && value.toLowerCase() !== zeroAddress ? getAddress(value) : null;
+};
+
 /** Everything the keeper needs about `ids` on BSC, at `block`. */
 export async function readBscRigs(c: Clients, ids: bigint[], block: bigint): Promise<BscRig[]> {
   if (ids.length === 0) return [];
@@ -249,26 +268,27 @@ export async function readBscRigs(c: Clients, ids: bigint[], block: bigint): Pro
         { address: ADDR.podMining, abi: podAbi, functionName: "getMiner", args: [k.key] },
         { address: ADDR.podMining, abi: podAbi, functionName: "pending", args: [k.key] },
         { address: ADDR.rigVault, abi: vaultAbi, functionName: "cellOf", args: [k.key] },
-        { address: k.circuits, abi: voucherAbi, functionName: "ownerOf", args: [k.circuitId] },
       ] as const),
     }),
   );
   if (!second) return ids.map((id) => empty(id, false));
 
   const cells = known.map((_, j) => {
-    const r = second[j * 4 + 2];
+    const r = second[j * 3 + 2];
     return r?.status === "success" ? (r.result as Address) : null;
   });
-  const third = await safe(
+  const withCell = known.flatMap((k, j) => {
+    const cell = cells[j];
+    return cell && cell.toLowerCase() !== zeroAddress ? [{ ...k, cell, j }] : [];
+  });
+  const third = withCell.length === 0 ? [] : await safe(
     b.multicall({
       allowFailure: true,
       blockNumber: block,
-      contracts: cells.map((cell) => ({
-        address: ADDR.bemBsc,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [cell ?? "0x0000000000000000000000000000000000000000"],
-      }) as const),
+      contracts: withCell.flatMap((k) => [
+        { address: k.circuits, abi: custodyOwnerAbi, functionName: "ownerOf", args: [k.circuitId] },
+        { address: ADDR.bemBsc, abi: erc20Abi, functionName: "balanceOf", args: [k.cell] },
+      ] as const),
     }),
   );
 
@@ -277,9 +297,11 @@ export async function readBscRigs(c: Clients, ids: bigint[], block: bigint): Pro
     const j = known.findIndex((k) => k.id === id);
     if (j < 0) return { ...empty(id, true), vaultKnows: false }; // the vault forgot it: a rescue
     const k = known[j]!;
-    const miner = second[j * 4];
-    const pending = second[j * 4 + 1];
-    const owner = second[j * 4 + 3];
+    const miner = second[j * 3];
+    const pending = second[j * 3 + 1];
+    const at = withCell.findIndex((k) => k.j === j);
+    const ownerRead = at < 0 ? undefined : third?.[at * 2];
+    const owner = ownerRead?.status === "success" ? custodyOwner(ownerRead.result) : null;
     const cell = cells[j];
     if (miner?.status !== "success" || pending?.status !== "success" || cell === null || cell === undefined) {
       return empty(id, false);
@@ -291,11 +313,13 @@ export async function readBscRigs(c: Clients, ids: bigint[], block: bigint): Pro
       since: bigint;
       verifWeight: bigint;
       bonus: bigint;
+      bstar: bigint;
+      mult: number;
     };
-    const cellBal = third?.[j];
+    const cellBal = at < 0 ? undefined : third?.[at * 2 + 1];
     return {
       id,
-      ok: cell === "0x0000000000000000000000000000000000000000" || (owner?.status === "success" && typeof owner.result === "string" && /^0x[0-9a-fA-F]{40}$/.test(owner.result)),
+      ok: cell.toLowerCase() === zeroAddress || owner !== null,
       vaultKnows: true,
       circuits: k.circuits,
       circuitId: k.circuitId,
@@ -304,11 +328,11 @@ export async function readBscRigs(c: Clients, ids: bigint[], block: bigint): Pro
       stopBlock: m.stopBlock,
       since: m.since,
       verifWeight: m.verifWeight,
-      bonus: m.bonus,
+      bonus: bonusWeight(m),
       pending: pending.result as bigint,
       cellBalance: cellBal?.status === "success" ? (cellBal.result as bigint) : 0n,
       // A failed custody read is unknown, never rescue evidence (RA-14).
-      custodied: cell !== "0x0000000000000000000000000000000000000000" && owner?.status === "success" && typeof owner.result === "string" && owner.result.toLowerCase() === cell.toLowerCase(),
+      custodied: cell.toLowerCase() !== zeroAddress && owner !== null && owner.toLowerCase() === cell.toLowerCase(),
     };
   });
 }

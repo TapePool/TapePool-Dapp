@@ -76,7 +76,7 @@ contract TableAgent is RigAgent {
 
 /// Redeploy 3, R3-08 item 2: table conformance. Fuzzes report and record fields, times, `feedDisabled`
 /// and `feedEnabledAt`, and compares the agent's evidence kind and clear verdict with a reference model
-/// written below from the R3-00 table alone. The harness exposes the agent's own internal functions;
+/// written below from the R3-00 table amended by R4-00. The harness exposes the agent's own internal functions;
 /// two end-to-end fuzzes check that `flagImpaired` and `clearExpiredFlag` decide by the same rows.
 contract Redeploy3EvidenceTableTest is Base {
     uint256 constant RIG = 7;
@@ -116,11 +116,10 @@ contract Redeploy3EvidenceTableTest is Base {
         return t > type(uint64).max ? type(uint64).max : t;
     }
 
-    /// base(r): ok (a revert reads as not ok), feed not disabled, the report is about the rig, and it is
+    /// R4-00 base(r): ok (a revert reads as not ok), the report is about the rig, and it is
     /// observed no later than now + MAX_CLOCK_SKEW.
     function _base(In memory x) internal pure returns (bool) {
-        return x.ok && !x.reverts && !x.feedDisabled && x.r.rigId == RIG
-            && uint256(x.r.observedAt) <= uint256(x.now_) + MAX_CLOCK_SKEW;
+        return x.ok && !x.reverts && x.r.rigId == RIG && uint256(x.r.observedAt) <= uint256(x.now_) + MAX_CLOCK_SKEW;
     }
 
     function _enableFloor(In memory x) internal pure returns (uint256) {
@@ -144,12 +143,13 @@ contract Redeploy3EvidenceTableTest is Base {
     }
 
     function _rowE(In memory x) internal pure returns (bool) {
-        return _base(x) && x.r.observedAt >= _enableFloor(x) && x.r.observedAt >= x.floor && _freshR(x) && _impairedR(x);
+        return !x.feedDisabled && _base(x) && x.r.observedAt >= _enableFloor(x) && x.r.observedAt >= x.floor
+            && _freshR(x) && _impairedR(x);
     }
 
     function _rowS(In memory x) internal pure returns (bool) {
-        return
-            _base(x) && x.r.observedAt >= _enableFloor(x) && x.r.observedAt > x.syncedAt && _saneR(x) && !_impairedR(x);
+        return !x.feedDisabled && _base(x) && x.r.observedAt >= _enableFloor(x) && x.r.observedAt > x.syncedAt
+            && _saneR(x) && !_impairedR(x);
     }
 
     function _rowVE(In memory x) internal pure returns (bool) {
@@ -157,21 +157,29 @@ contract Redeploy3EvidenceTableTest is Base {
     }
 
     function _rowH(In memory x) internal pure returns (bool) {
-        return _base(x) && x.r.observedAt >= _enableFloor(x) && x.r.observedAt >= x.floor && _freshR(x) && _saneR(x)
-            && !_impairedR(x);
+        return !x.feedDisabled && _base(x) && x.r.observedAt >= _enableFloor(x) && x.r.observedAt >= x.floor
+            && _freshR(x) && _saneR(x) && !_impairedR(x);
     }
 
     function _rowB(In memory x) internal pure returns (bool) {
         return _base(x) && x.r.observedAt >= x.floor && _impairedR(x);
     }
 
-    /// Row U (v4): a report that is not impaired, at or after the floor, below the enable floor.
+    /// Row U (R4-00): a report that is not impaired, at or after the floor, with feed off or below the enable floor.
     function _rowU(In memory x) internal pure returns (bool) {
-        return _base(x) && x.r.observedAt >= x.floor && x.r.observedAt < _enableFloor(x) && !_impairedR(x);
+        return
+            _base(x) && x.r.observedAt >= x.floor && (x.feedDisabled || x.r.observedAt < _enableFloor(x))
+                && !_impairedR(x);
     }
 
     function _rowVC(In memory x) internal pure returns (bool) {
         return _known(x) && x.syncedAt >= x.floor;
+    }
+
+    /// Row N (R4-08): a non-impaired report at both floors, feed on, that is not health.
+    function _rowN(In memory x) internal pure returns (bool) {
+        return !x.feedDisabled && _base(x) && x.r.observedAt >= _enableFloor(x) && x.r.observedAt >= x.floor
+            && !_impairedR(x) && (!_freshR(x) || !_saneR(x));
     }
 
     /// Flag and seize: kind 1 for row E (checked first), kind 2 for row VE, else 0.
@@ -183,14 +191,14 @@ contract Redeploy3EvidenceTableTest is Base {
 
     /// Clear: the newest candidate among the report (row H healthy, row B impaired, row U unknown) and
     /// the record (row VC); impairment wins a tie; no candidate is missing (0). Unknown masks only
-    /// health: under row U a power-0 record is impaired at any age (v5, L-04), a positive record decides
-    /// only when synced after the report, and otherwise the rig reads as missing.
+    /// health: under row U or N a power-0 record is impaired at any age, a positive record decides
+    /// only when synced after the report, and otherwise the rig reads as unknown (3).
     function _refVerdict(In memory x) internal pure returns (uint8) {
-        if (_rowU(x)) {
+        if (_rowU(x) || _rowN(x)) {
             if (x.power == 0 && _rowVC(x)) return 2;
-            if (!_rowVC(x) || x.syncedAt < x.r.observedAt) return 0;
+            if (!_rowVC(x) || x.syncedAt < x.r.observedAt) return 3;
             if (x.syncedAt > x.r.observedAt) return x.power == 0 ? 2 : 1;
-            return x.power == 0 ? 2 : 0;
+            return x.power == 0 ? 2 : 3;
         }
         bool rep = _rowH(x) || _rowB(x);
         bool rec = _rowVC(x);
@@ -301,18 +309,24 @@ contract Redeploy3EvidenceTableTest is Base {
     /// Which parts of the table a fixed set of cases reaches.
     struct Seen {
         uint256[3] kinds;
-        uint256[3] verdicts;
+        uint256[4] verdicts;
         uint256 shield; // row S stops an otherwise valid row VE
         uint256 staleB; // row B older than MAX_REPORT_AGE
+        uint256 staleN; // row N from a stale non-impaired report
+        uint256 insaneN; // row N from an insane non-impaired report
         uint256 brakeB; // row B below the enable floor
         uint256 tie; // a report candidate and a record candidate at the same second
         uint256 enableEdge; // observedAt at the enable floor or one below, with base(r)
         uint256 floorEdge; // observedAt or syncedAt at the floor or one below
         uint256 futureRecord; // syncedAt one or more seconds past now + MAX_CLOCK_SKEW
-        uint256 maskOlder; // row U over an older positive row VC record: missing
+        uint256 maskOlder; // row U over an older positive row VC record: unknown
         uint256 maskOlderZero; // row U over an older power-0 row VC record: impaired (L-04)
         uint256 maskTie; // row U and a row VC record at the same second
         uint256 maskNewer; // row U and a row VC record synced after it: the record decides
+        uint256 maskNOlder; // row N over an older positive row VC record: unknown
+        uint256 maskNOlderZero; // row N over an older power-0 row VC record: impaired
+        uint256 maskNTie; // row N and a row VC record at the same second
+        uint256 maskNNewer; // row N and a row VC record synced after it: the record decides
     }
 
     function _see(Seen memory c, In memory x, uint8 kind, uint8 v) internal pure {
@@ -320,6 +334,8 @@ contract Redeploy3EvidenceTableTest is Base {
         ++c.verdicts[v];
         if (_rowS(x) && _known(x) && x.power == 0 && x.syncedAt >= x.floor) ++c.shield;
         if (_rowB(x) && !_freshR(x)) ++c.staleB;
+        if (_rowN(x) && !_freshR(x)) ++c.staleN;
+        if (_rowN(x) && !_saneR(x)) ++c.insaneN;
         if (_rowB(x) && x.r.observedAt < _enableFloor(x)) ++c.brakeB;
         if ((_rowH(x) || _rowB(x)) && _rowVC(x) && x.r.observedAt == x.syncedAt) ++c.tie;
         uint256 ef = _enableFloor(x);
@@ -334,6 +350,12 @@ contract Redeploy3EvidenceTableTest is Base {
             else if (x.syncedAt < x.r.observedAt) ++c.maskOlder;
             else if (x.syncedAt == x.r.observedAt) ++c.maskTie;
             else ++c.maskNewer;
+        }
+        if (_rowN(x) && _rowVC(x)) {
+            if (x.syncedAt < x.r.observedAt && x.power == 0) ++c.maskNOlderZero;
+            else if (x.syncedAt < x.r.observedAt) ++c.maskNOlder;
+            else if (x.syncedAt == x.r.observedAt) ++c.maskNTie;
+            else ++c.maskNNewer;
         }
     }
 
@@ -352,10 +374,14 @@ contract Redeploy3EvidenceTableTest is Base {
         }
         for (uint256 k; k < 3; ++k) {
             assertGt(c.kinds[k], 20, "every evidence kind is reached");
+        }
+        for (uint256 k; k < 4; ++k) {
             assertGt(c.verdicts[k], 20, "every verdict is reached");
         }
         assertGt(c.shield, 5, "row S shields");
         assertGt(c.staleB, 5, "stale row B");
+        assertGt(c.staleN, 5, "stale row N");
+        assertGt(c.insaneN, 5, "insane row N");
         assertGt(c.brakeB, 5, "row B below the enable floor");
         assertGt(c.tie, 5, "ties");
         assertGt(c.enableEdge, 5, "enable floor edges");
@@ -365,6 +391,10 @@ contract Redeploy3EvidenceTableTest is Base {
         assertGt(c.maskOlderZero, 2, "an older power-0 record blocks under row U");
         assertGt(c.maskTie, 2, "row U ties with a record");
         assertGt(c.maskNewer, 5, "a record newer than row U decides");
+        assertGt(c.maskNOlder, 5, "row N masks an older positive record");
+        assertGt(c.maskNOlderZero, 2, "an older power-0 record blocks under row N");
+        assertGt(c.maskNTie, 2, "row N ties with a record");
+        assertGt(c.maskNNewer, 5, "a record newer than row N decides");
     }
 
     // ───────────────────────── end to end: flagImpaired and clearExpiredFlag

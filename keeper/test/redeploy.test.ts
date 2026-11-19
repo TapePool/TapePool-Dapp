@@ -181,7 +181,7 @@ describe("RB-04 push isolation", () => {
     await expect(isolatedPush([16n], async () => { throw new Error("rpc"); }, async () => ({ status: "dry" }), () => {})).rejects.toThrow("rpc");
   });
   it("does not classify failed custody as rescue", async () => {
-    const c = { bsc: { public: { multicall: async ({ contracts }: { contracts: { functionName: string }[] }) => contracts.map(({ functionName }) => functionName === "ownerOf" ? { status: "failure" } : { status: "success", result: ({ rigs: [CELL, 16n], getMiner: { status: 1, stopBlock: 0n, verifWeight: 1n, bonus: 0n }, pending: 0n, cellOf: CELL, balanceOf: 0n } as Record<string, unknown>)[functionName] }) } } } as unknown as Clients;
+    const c = { bsc: { public: { multicall: async ({ contracts }: { contracts: { functionName: string }[] }) => contracts.map(({ functionName }) => functionName === "ownerOf" ? { status: "failure" } : { status: "success", result: ({ rigs: [CELL, 16n], getMiner: { status: 1, stopBlock: 0n, verifWeight: 1n, bstar: 1n, mult: 1, bonus: 0n }, pending: 0n, cellOf: CELL, balanceOf: 0n } as Record<string, unknown>)[functionName] }) } } } as unknown as Clients;
     expect((await readBscRigs(c, [16n], 1n))[0]!.ok).toBe(false);
   });
   it("isolates request pushes per rig and shares the once-per-day custody alert with the keeper", async () => {
@@ -292,7 +292,7 @@ describe("RB-09 RA-07 verdicts", () => {
     expect(verdict(16n, NOW - 100, NOW, healthy, { syncedAt: NOW - 1, power: 0n })).toBe("healthy");
     expect(verdict(16n, NOW - 100, NOW, healthy, { syncedAt: NOW + 1, power: 0n })).toBe("impaired");
     expect(verdict(16n, NOW - 100, NOW, healthy, { syncedAt: NOW, power: 0n })).toBe("impaired");
-    expect(verdict(16n, NOW, NOW, report(16n, NOW, { totalVerifWeight: 0n }), undefined)).toBe("missing");
+    expect(verdict(16n, NOW, NOW, report(16n, NOW, { totalVerifWeight: 0n }), undefined)).toBe("unknown");
     expect(verdict(16n, NOW, NOW, report(16n, NOW, { custodied: false, verifWeight: 0n }), undefined)).toBe("impaired");
     expect(reportVerdict(report(16n, NOW, { verifWeight: 500n, bonus: 400n }), 16n, NOW, NOW)).toBe("healthy");
     expect(clearPlan(17n, 16n, NOW, NOW, null, { syncedAt: 1, power: 0n }, {}).blocks).toBe(false);
@@ -309,7 +309,7 @@ describe("RB-09 RA-07 verdicts", () => {
   });
   it("refreshes stale healthy readings without counting them as timely health evidence", () => {
     const stale = report(17n, NOW - 301), zero = { syncedAt: NOW - 1, power: 0n };
-    expect(reportVerdict(stale, 17n, 0, NOW)).toBe("missing");
+    expect(reportVerdict(stale, 17n, 0, NOW)).toBe("unknown");
     expect(clearPlan(17n, 16n, NOW - 100, NOW, stale, zero, {})).toMatchObject({ blocks: true, harvest: true, push: false, alert: false });
     expect(clearPlan(17n, 16n, NOW - 100, NOW + 60, stale, { syncedAt: NOW + 30, power: 0n }, { sentAt: NOW, syncedBefore: NOW - 1 })).toMatchObject({ blocks: true, harvest: false, push: true });
     expect(clearPlan(17n, 16n, NOW - 100, NOW, { ...stale, totalVerifWeight: 0n }, zero, {}).harvest).toBe(false);
@@ -326,7 +326,7 @@ describe("RB-03/RB-08/RB-09 keeper wiring", () => {
     const c = { account: { address: A(100) }, bsc: { public: {
       readContract: async () => 100_000n,
       multicall: async ({ contracts }: { contracts: { functionName: string; args: unknown[] }[] }) => contracts.map((q) => ({ status: "success", result: ({
-        rigs: [CELL, q.args[0]], getMiner: { status: bad ? 3 : 1, stopBlock: 0n, since: 1n, taskId: 4, verifWeight: bad ? 0n : 500n, bonus: 0n },
+        rigs: [CELL, q.args[0]], getMiner: { status: bad ? 3 : 1, stopBlock: 0n, since: 1n, taskId: 4, verifWeight: bad ? 0n : 500n, bstar: 500n, mult: 1, bonus: 0n },
         pending: 50_000n, cellOf: CELL, ownerOf: CELL, balanceOf: 0n,
       } as Record<string, unknown>)[q.functionName] })),
     } }, xlayer: { public: {

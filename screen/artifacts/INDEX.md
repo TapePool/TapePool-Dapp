@@ -20,3 +20,4 @@
 | 16 | 4 | 128895140 | 73797346 | A | PASS | `0x55f3c1aa7caa1fc549b681fad15b4465d13ad25006f2790bb61c56fa8a6da2bf` | [rig-16-55f3c1aa.json](rig-16-55f3c1aa.json) |
 | 16 (re-verification) | 4 | 130871524 | 74687182 | A | PASS | `0x3e4646589773f3666d1582f097f2ebe214cdd21373b9d7649f483a191e0b4670` | [rig-16-reverify-130871524-3e464658.json](rig-16-reverify-130871524-3e464658.json) |
 | 16 (re-verification) | 4 | 131254985 | 74859785 | A | PASS | `0xa917402db9b7e25ccc16bae17f89acce2b8c5ac061c5ccd8d9ed0358f64e6537` | [rig-16-reverify-131254985-a917402d.json](rig-16-reverify-131254985-a917402d.json) |
+| 16 (re-verification) | 4 | 133953891 | 76074904 | A | PASS | `0xdb41668ae82106082edaac21985f92a373ea868b103f113ce281ed3c608552dc` | [rig-16-reverify-133953891-db41668a.json](rig-16-reverify-133953891-db41668a.json) |

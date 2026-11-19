@@ -205,14 +205,12 @@ test('4. a paused pool: borrow is off with the reason, and the flow resumes when
   await m.connect();
   // the pool lends nothing while paused (maxLend is 0), so the page says why and offers no step at all
   await expect(m.page.getByText('New borrows are paused.').first()).toBeVisible();
-  await expect(m.page.getByText('Borrows paused')).toBeVisible();
   await expect(m.page.getByText('Nothing to borrow for this choice right now.')).toBeVisible();
   await expect(m.page.locator('[data-a="create"], [data-a="move"], [data-a="refresh"], [data-a="borrow"], [data-a="reuse"]')).toHaveCount(0);
   // the owner resumes borrows: the flow is back, and nothing was sent by the miner meanwhile
   await s.as('xl', OWNER).writeContract({ address: s.d.pool, abi: poolAdmin, functionName: 'unpauseBorrows' });
   await m.reread();
   await expect(m.page.getByText('New borrows are paused.')).toHaveCount(0);
-  await expect(m.page.getByText('Borrows open')).toBeVisible();
   await expect(m.page.locator('[data-a="reuse"], [data-a="create"]').first()).toBeVisible();
   expect(m.wallet.sent).toHaveLength(0);
   expect(m.problems).toEqual([]);
@@ -523,7 +521,6 @@ test('7. deposits close while a loan is doubtful: a rescue, the keeper\'s flag, 
   await s.as('xl', OWNER).writeContract({ address: s.d.pool, abi: brake, functionName: 'enableFeed' });
   await l.reread();
   await expect(l.page.getByText('Deposits are closed while a loan is under review.').first()).toBeVisible();
-  await expect(l.page.getByText('Deposits closed')).toBeVisible(); // the footer says so too
   await expect(l.page.locator('[data-a="approve-supply"], [data-a="supply"]')).toHaveCount(0); // both buttons are off
   expect(await s.xl.readContract({ address: s.d.pool, abi: tapePoolAbi, functionName: 'maxDeposit', args: [e2e.lender] })).toBe(0n);
   const doubtful = await s.xl.readContract({ address: s.d.pool, abi: tapePoolAbi, functionName: 'stats' }).then((x) => x.doubtful);

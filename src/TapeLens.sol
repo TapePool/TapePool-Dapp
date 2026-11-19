@@ -164,6 +164,7 @@ contract TapeLens {
         if (pool.policySwapQueued()) return Reasons.SWAP_QUEUED;
         if (pool.borrowsPaused()) return Reasons.PAUSED;
         if (pool.feedDisabled()) return Reasons.FEED_OFF;
+        if (block.timestamp < uint256(pool.feedEnabledAt()) + pool.FEED_SETTLE()) return Reasons.FEED_OFF;
         if (ids.length == 0) return Reasons.NO_COLLATERAL;
         IRigVoucher voucher = agent.voucher();
         for (uint256 i; i < ids.length; ++i) {

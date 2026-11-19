@@ -32,7 +32,9 @@ library BscRigReader {
         r.since = m.since;
         r.taskId = m.taskId;
         r.verifWeight = uint256(m.verifWeight).toUint64();
-        r.bonus = m.bonus;
+        uint256 weight = m.verifWeight;
+        uint256 base = uint256(m.bstar) * m.mult;
+        r.bonus = (base < weight ? weight - base : 0).toUint64();
         r.totalVerifWeight = pod.totalVerifWeight().toUint64();
         r.pending = pod.pending(key).toUint128();
 
@@ -51,7 +53,7 @@ library BscRigReader {
             ok := and(ok, gt(returndatasize(), 0x1f))
             word := mload(0)
         }
-        if (!ok || word > type(uint160).max) revert CustodyUnreadable(rigId);
+        if (!ok || word == 0 || word > type(uint160).max) revert CustodyUnreadable(rigId);
         return address(uint160(word)) == cell;
     }
 }

@@ -329,7 +329,7 @@ contract TapePoolTest is Base {
         assertEq(pool.reserve(), 200_000, "capped at 0.01% of the assets before this payment");
         vm.warp(pool.vestEnd());
         _agentPays(a, 3_000_000, 0);
-        assertEq(pool.reserve(), 200_280, "room grew only by 0.01% of the fee lenders kept");
+        assertEq(pool.reserve(), 200_000, "vesting does not widen the loan's stored cap");
     }
 
     function test_repay_more_principal_than_lent_reverts() public {

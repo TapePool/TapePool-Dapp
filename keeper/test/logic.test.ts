@@ -540,9 +540,7 @@ describe("per-loan machine", () => {
 
   it("after expiry: clear on fresh health of the flagged rig, or flag again", () => {
     const loan = { open: true, impairedAt: 1, seizeStart: now - 10_000, deadline: now - 5_000, expired: true, impairedRig: 16n };
-    expect(nextActions(input({ loan, rigs: [rig({ lastPushAt: now - 1_000, storedObservedAt: now - 995 })] }))).toEqual([
-      { kind: "push", rigs: [16n] },
-    ]);
+    expect(nextActions(input({ loan, rigs: [rig({ lastPushAt: now - 1_000, storedObservedAt: now - 995 })] }))).toEqual([]);
     expect(nextActions(input({ loan, rigs: [rig({ lastPushAt: now - 50, storedObservedAt: now - 40 })] }))).toEqual([
       { kind: "clear" },
     ]);

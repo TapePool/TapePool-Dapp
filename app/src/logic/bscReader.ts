@@ -16,6 +16,8 @@ export interface MinerRaw {
   taskId: number;
   verifWeight: bigint;
   bonus: bigint;
+  bstar: bigint;
+  mult: number;
 }
 
 /** What `BscRigReader.read` leaves behind for a rig the vault no longer knows (after a rescue): all zero. It is impairment evidence. */
@@ -36,12 +38,19 @@ export const FORGOTTEN: BscFacts = {
 export const vaultForgot = (circuits: Address): boolean => circuits.toLowerCase() === ZERO_ADDRESS;
 
 /**
- * `custodied` is `cell != 0 && circuits.ownerOf(circuitId) == cell`. A read that failed counts as "not custodied",
- * the way the contract's gas-capped static call does.
+ * A zero cell is not custodied. An unreadable or zero owner is unknown; a valid other owner is not custodied.
  */
-export function isCustodied(cell: Address | null, owner: Address | null): boolean {
-  if (cell === null || owner === null) return false;
-  return cell.toLowerCase() !== ZERO_ADDRESS && cell.toLowerCase() === owner.toLowerCase();
+export function isCustodied(cell: Address | null, owner: Address | null): boolean | null {
+  if (cell === null || !/^0x[0-9a-f]{40}$/i.test(cell)) return null;
+  if (cell.toLowerCase() === ZERO_ADDRESS) return false;
+  if (owner === null || !/^0x[0-9a-f]{40}$/i.test(owner) || owner.toLowerCase() === ZERO_ADDRESS) return null;
+  return cell.toLowerCase() === owner.toLowerCase();
+}
+
+/** R4-01: raw miner bonus is not a weight. Only ingestion of a raw miner uses this conversion. */
+export function bonusWeight(m: Pick<MinerRaw, 'verifWeight' | 'bstar' | 'mult'>): bigint {
+  const base = m.bstar * BigInt(m.mult);
+  return base < m.verifWeight ? m.verifWeight - base : 0n;
 }
 
 /** `mined` is `pending + the cell's BEM`, or null when either read failed. */
@@ -51,7 +60,7 @@ export function factsFromMiner(circuits: Address, circuitId: bigint, m: MinerRaw
     stopBlock: m.stopBlock,
     custodied,
     verifWeight: m.verifWeight,
-    bonus: m.bonus,
+    bonus: bonusWeight(m),
     since: Number(m.since),
     mined,
     circuits,

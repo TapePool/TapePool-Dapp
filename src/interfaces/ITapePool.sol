@@ -41,6 +41,8 @@ interface ITapePool {
     function absorbedOf(address agent) external view returns (uint256);
     /// @notice Reserve terms fixed for the agent's current loan.
     function loanReserveTerms(address agent) external view returns (uint16 shareBps, uint16 capBps);
+    /// @notice Lender assets when the agent's open loan began; 0 with no open loan.
+    function reserveBaseOf(address agent) external view returns (uint256);
     /// @notice Current admission limit and the lowest-numbered binding constraint.
     function lendLimit(address borrower) external view returns (uint256 amount, uint8 binding);
     /// @notice Whether a policy swap is queued and live.

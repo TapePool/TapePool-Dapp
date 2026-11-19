@@ -17,6 +17,8 @@ export interface Call {
   args?: readonly unknown[];
   value?: bigint;
   urgency: Urgency;
+  /** Called with the original attempt time before its journal checkpoint and first broadcast. */
+  beforeBroadcast?: (createdAt: number) => void;
 }
 
 export type SendResult =
@@ -54,7 +56,7 @@ export interface SenderOptions {
   now?: () => number;
   journal?: PendingTx[];
   persist?: () => void;
-  mined?: (call: Call, receipt: TransactionReceipt) => void;
+  mined?: (call: Call, receipt: TransactionReceipt, sentAt: number) => void;
 }
 
 /** Short revert reason (custom error name when the ABI knows it). */
@@ -185,6 +187,7 @@ export class Sender {
       const signed = await this.sign(call, nonce, gasPrice);
       const at = this.now();
       this.pending.push({ call, hash: signed.hash, hashes: [signed.hash], data: signed.data, raw: signed.raw, nonce, gasPrice, sentAt: at, createdAt: at });
+      call.beforeBroadcast?.(at);
       this.checkpoint(); // durable hash before the first byte reaches the RPC
       await this.broadcast(signed.raw, signed.hash, call);
       log("info", "sent", { chain: this.chain.name, call: call.label, hash: signed.hash, nonce, gasPrice });
@@ -267,7 +270,7 @@ export class Sender {
         if (receipt) break;
       }
       if (receipt) {
-        this.opt.mined?.(p.call, receipt);
+        this.opt.mined?.(p.call, receipt, p.createdAt);
         if (receipt.status !== "success") this.opt.alert(`${this.chain.name}: ${p.call.label} reverted on chain (${receipt.transactionHash})`);
         this.pending = this.pending.filter((q) => q !== p);
         this.checkpoint();

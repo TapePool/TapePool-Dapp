@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EDGE, Engine, earliest, KEEP, money, parseStake, payout, priced, ROW, SIGMA_FLOOR, STEP, touch, UNIT, WINDOW } from '../src/dev/trace/engine';
+import { EDGE, Engine, earliest, KEEP, money, parseStake, payout, priced, ROW, SIGMA_FLOOR, STEP, touch, UNIT, WINDOW } from '../src/tape/engine';
 
 /** An engine opened on a flat $110.50 history, as if the index had not moved for 2 minutes. */
 function opened(price = 110_500): Engine { const g = new Engine(); g.reset(Array.from({ length: KEEP }, () => price)); return g; }

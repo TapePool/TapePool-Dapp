@@ -24,6 +24,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { bscChain, xlayerChain, type Clients } from "../../src/chains.js";
 import { loadConfig, type Config } from "../../src/config.js";
 import { Keeper, LOG_LAG } from "../../src/keeper.js";
+import { recordHarvestReceipt } from "../../src/logic/harvestLanding.js";
 import { PushLimiter } from "../../src/logic/pushLimits.js";
 import { PushService } from "../../src/push.js";
 import { emptyState } from "../../src/state.js";
@@ -164,13 +165,15 @@ export async function startStack(bscPort: number, xlPort: number, opts: StackOpt
     await startAnvil(process.env.BSC_RPC!, BSC_BLOCK, bscPort, CUPS_KEYED),
     await startAnvil(xlUpstream, XL_BLOCK, xlPort, process.env.XLAYER_RPC ? CUPS_KEYED : CUPS_PUBLIC),
   ];
+  // A cold fork read goes upstream through anvil and can exceed viem's 10 s default.
+  const LOCAL = { timeout: 120_000 };
   // no block-number cache: marks and log ranges must see blocks mined a moment ago
-  const bsc = createPublicClient({ chain: bscChain, transport: http(BSC_URL), cacheTime: 0 });
-  const xl = createPublicClient({ chain: xlayerChain, transport: http(XL_URL), cacheTime: 0 });
-  const bscTest = createTestClient({ mode: "anvil", chain: bscChain, transport: http(BSC_URL) });
-  const xlTest = createTestClient({ mode: "anvil", chain: xlayerChain, transport: http(XL_URL) });
+  const bsc = createPublicClient({ chain: bscChain, transport: http(BSC_URL, LOCAL), cacheTime: 0 });
+  const xl = createPublicClient({ chain: xlayerChain, transport: http(XL_URL, LOCAL), cacheTime: 0 });
+  const bscTest = createTestClient({ mode: "anvil", chain: bscChain, transport: http(BSC_URL, LOCAL) });
+  const xlTest = createTestClient({ mode: "anvil", chain: xlayerChain, transport: http(XL_URL, LOCAL) });
   const as = (chain: "bsc" | "xl", account: Address) =>
-    createWalletClient({ account, chain: chain === "bsc" ? bscChain : xlayerChain, transport: http(chain === "bsc" ? BSC_URL : XL_URL) });
+    createWalletClient({ account, chain: chain === "bsc" ? bscChain : xlayerChain, transport: http(chain === "bsc" ? BSC_URL : XL_URL, LOCAL) });
 
   for (const a of [DEPLOYER, GUARDIAN]) {
     await bscTest.setBalance({ address: a, value: parseEther("100") });
@@ -284,8 +287,8 @@ export async function startStack(bscPort: number, xlPort: number, opts: StackOpt
   const keeperAccount = privateKeyToAccount(GUARDIAN_KEY);
   const clients: Clients = {
     account: keeperAccount,
-    bsc: { name: "bsc", public: bsc, wallet: createWalletClient({ account: keeperAccount, chain: bscChain, transport: http(BSC_URL) }) },
-    xlayer: { name: "xlayer", public: xl, wallet: createWalletClient({ account: keeperAccount, chain: xlayerChain, transport: http(XL_URL) }) },
+    bsc: { name: "bsc", public: bsc, wallet: createWalletClient({ account: keeperAccount, chain: bscChain, transport: http(BSC_URL, LOCAL) }) },
+    xlayer: { name: "xlayer", public: xl, wallet: createWalletClient({ account: keeperAccount, chain: xlayerChain, transport: http(XL_URL, LOCAL) }) },
   } as unknown as Clients;
   const cfg: Config = loadConfig({
     KEEPER_MODE: "live",
@@ -300,7 +303,8 @@ export async function startStack(bscPort: number, xlPort: number, opts: StackOpt
   const now = nowSec;
   const cap = parseEther("0.00001"); // generous gas cap on local forks
   const senders = {
-    bsc: new Sender(clients.bsc, { mode: "live", capWei: cap, stuckAfterSec: 180, alert: (t) => alertsSeen.push(t), now }),
+    bsc: new Sender(clients.bsc, { mode: "live", capWei: cap, stuckAfterSec: 180, alert: (t) => alertsSeen.push(t), now,
+      mined: (call, receipt, sentAt) => recordHarvestReceipt(holder.keeper.state.harvestLandings, call, receipt, sentAt) }),
     xlayer: new Sender(clients.xlayer, { mode: "live", capWei: cap, stuckAfterSec: 60, alert: (t) => alertsSeen.push(t), now }),
   };
   const state = emptyState(d.factoryDeployBlock, d.factory);

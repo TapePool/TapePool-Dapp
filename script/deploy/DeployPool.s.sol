@@ -19,7 +19,7 @@ import {Addresses as A} from "../Addresses.sol";
 ///   forge script script/deploy/DeployPool.s.sol --sig "run(address,uint256,address)" \
 ///     <policyCircuits> <policyCircuitId> <feedReceiver> --account tapepool-probe   (add --broadcast to send)
 /// The deployer keeps no power: the pool's owner and guardian are passed to the constructor.
-/// Redeploy 3 (SPEC-REDEPLOY-3 R3-07, O3-4) passes the reused receiver `Addresses.FEED_RECEIVER_XLAYER_2`
+/// Redeploy 4 (R4-06) passes the newly deployed receiver, never a zero placeholder,
 /// and policy circuit id 1, unchanged: it deploys a new screen, policy, factory with its agent
 /// implementation, pool and lens, and no feed. The pool's constructor sets the launch values (O3-7);
 /// `CheckStack` asserts them.
@@ -35,8 +35,10 @@ contract DeployPool is Script {
     /// @notice Simulate deployment by default; only forge's explicit --broadcast sends transactions.
     function run(address circuits, uint256 circuitId, address feed) external returns (Deployed memory d) {
         // broadcast goes to the chain given by --rpc-url; BSC is only read, on a separate fork
-        uint256 home = vm.activeFork();
         require(block.chainid == A.XLAYER_CHAIN_ID, "X Layer only");
+        require(circuits == A.POLICY_CIRCUITS && circuitId == A.POLICY_CIRCUIT_ID, "redeploy 4 circuit");
+        require(feed != address(0) && feed == A.FEED_RECEIVER_XLAYER_4, "redeploy 4 receiver not deployed");
+        uint256 home = vm.activeFork();
         vm.selectFork(vm.createFork("bsc"));
         require(emissionEnd() == A.EMISSION_VALID_UNTIL, "first halving moved: review emissionValidUntil");
         vm.selectFork(home);

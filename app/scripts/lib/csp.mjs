@@ -3,11 +3,14 @@
 
 import { createHash } from 'node:crypto';
 
+/** The one origin the Tape game reads its price from (src/tape/feed.ts `OKX_REST`): public market data over HTTPS, no key. */
+export const PRICE_ORIGIN = 'https://www.okx.com';
+
 /** Directive order of the policy the app ships. */
 const ORDER = ['default-src', 'script-src', 'style-src', 'img-src', 'font-src', 'connect-src', 'base-uri', 'form-action'];
 
 /**
- * The policy of the multi-file build. `connect` is the list of origins the app talks to: the two RPCs and the keeper (when
+ * The policy of the multi-file build. `connect` is the list of origins the app talks to: the two RPCs, the price origin and the keeper (when
  * there is one). Everything else is the same-origin files of the build, with images also allowed as data: URIs.
  * No 'unsafe-inline', no 'unsafe-eval', no inline script or style (the single-file build swaps in SHA-256 hashes instead).
  * @param {{ connect?: readonly string[], script?: readonly string[], style?: readonly string[], font?: readonly string[], img?: readonly string[] }} [opts]

@@ -21,7 +21,8 @@ contract PoolHandler is Test {
         NoCustody,
         Rescued,
         ZeroPower,
-        NoReport
+        NoReport,
+        Insane
     }
 
     /// What this handler knows about the flag on an agent's loan, from its own successful calls.
@@ -88,9 +89,18 @@ contract PoolHandler is Test {
     uint64 internal enabledAt;
     mapping(address => uint16) internal loanShare;
     mapping(address => uint16) internal loanCap;
+    mapping(address => uint256) public loanBase;
     uint256 internal expectedOwnerEth;
 
     uint256 public violations;
+    uint256 public brakeFlaggedB;
+    uint256 public brakeOtherB;
+    uint256 public brakeOtherU;
+    uint256 public rowNFlagged;
+    uint256 public rowNOther;
+    uint256 public bindingReservePayments;
+    bool public openedLoan;
+    bool internal immutable campaignCounters;
     string public firstViolation;
     /// True while the voucher mock may have listed a token the agent does not hold (see `breakVoucher`).
     bool public lied;
@@ -122,6 +132,16 @@ contract PoolHandler is Test {
         pool = pool_;
         owner = owner_;
         guardian = guardian_;
+        campaignCounters = vm.envOr("TAPEPOOL_R4_COUNTERS", false);
+        if (campaignCounters) {
+            vm.setEnv("TAPEPOOL_R4_FLAGGED_B", "0");
+            vm.setEnv("TAPEPOOL_R4_OTHER_B", "0");
+            vm.setEnv("TAPEPOOL_R4_OTHER_U", "0");
+            vm.setEnv("TAPEPOOL_R4_FLAGGED_N", "0");
+            vm.setEnv("TAPEPOOL_R4_OTHER_N", "0");
+            vm.setEnv("TAPEPOOL_R4_CAPPED_REPAY", "0");
+            vm.setEnv("TAPEPOOL_R4_LOAN_RUNS", "0");
+        }
         for (uint256 i; i < N_LENDERS; ++i) {
             lenders.push(makeAddr(string.concat("handler.lender", vm.toString(i))));
         }
@@ -131,6 +151,35 @@ contract PoolHandler is Test {
     }
 
     // ───────────────────────── views for the invariant contract
+
+    /// Optional process-local totals survive the fuzzer's per-sequence EVM rollback. Use only with
+    /// this invariant selected alone; these metrics never participate in a check or an action.
+    function reportBlockCounts() external view returns (uint256 flaggedB, uint256 otherB, uint256 otherU) {
+        if (!campaignCounters) return (brakeFlaggedB, brakeOtherB, brakeOtherU);
+        return (
+            vm.envOr("TAPEPOOL_R4_FLAGGED_B", uint256(0)),
+            vm.envOr("TAPEPOOL_R4_OTHER_B", uint256(0)),
+            vm.envOr("TAPEPOOL_R4_OTHER_U", uint256(0))
+        );
+    }
+
+    function _countReportBlock(string memory name) internal {
+        if (campaignCounters) vm.setEnv(name, vm.toString(vm.envOr(name, uint256(0)) + 1));
+    }
+
+    function rowNBlockCounts() external view returns (uint256 flagged, uint256 other) {
+        if (!campaignCounters) return (rowNFlagged, rowNOther);
+        return (vm.envOr("TAPEPOOL_R4_FLAGGED_N", uint256(0)), vm.envOr("TAPEPOOL_R4_OTHER_N", uint256(0)));
+    }
+
+    function reserveBindingCount() external view returns (uint256) {
+        return campaignCounters ? vm.envOr("TAPEPOOL_R4_CAPPED_REPAY", uint256(0)) : bindingReservePayments;
+    }
+
+    /// Count each sequence once, on its first successful borrow, even if that loan later closes.
+    function loanRunCount() external view returns (uint256) {
+        return campaignCounters ? vm.envOr("TAPEPOOL_R4_LOAN_RUNS", uint256(0)) : (openedLoan ? 1 : 0);
+    }
 
     function agentCount() external view returns (uint256) {
         return agentList.length;
@@ -375,7 +424,7 @@ contract PoolHandler is Test {
             r.custodied = h != Health.NoCustody;
             r.verifWeight = base + 10;
             r.bonus = 10;
-            r.totalVerifWeight = NETWORK_WEIGHT;
+            r.totalVerifWeight = h == Health.Insane ? 0 : NETWORK_WEIGHT;
             r.bscBlock = 1;
             r.taskId = 4;
             feed.set(r);
@@ -403,10 +452,9 @@ contract PoolHandler is Test {
 
     // ───────────────────────── the impairment model (SPEC §7.2, §10.5, redeploy 3 R3-00)
 
-    /// R3-00 base(r): a stored report while the feed is on, about the rig, not dated too far ahead.
+    /// R4-00 base(r): a stored report about the rig, not dated too far ahead, in every brake state.
     function _reportBase(uint256 id) internal view returns (bool) {
-        return !pool.feedDisabled() && !feed.broken() && postedHealth[id] != Health.NoReport
-            && postedAt[id] <= block.timestamp + CLOCK_SKEW;
+        return !feed.broken() && postedHealth[id] != Health.NoReport && postedAt[id] <= block.timestamp + CLOCK_SKEW;
     }
 
     function _fresh(uint256 id) internal view returns (bool) {
@@ -430,32 +478,37 @@ contract PoolHandler is Test {
 
     /// Impairment evidence for rig `id`: a fresh bad report seen at or after `from` and the enable
     /// floor (row E), or a voucher record with power 0 synced at or after `syncedFrom` (row VE) that no
-    /// newer good report at or after the enable floor shields, whatever its age (row S). Every good
-    /// report this handler posts is sane.
+    /// newer sane good report at or after the enable floor shields, whatever its age (row S).
     function _impairedModel(uint256 id, uint256 from, uint256 syncedFrom) internal view returns (bool) {
-        bool admitted = _reportBase(id) && postedAt[id] >= _enableFloor();
+        bool admitted = !pool.feedDisabled() && _reportBase(id) && postedAt[id] >= _enableFloor();
         if (admitted && _fresh(id) && postedAt[id] >= from && _badReport(id)) return true;
-        bool shield = admitted && !_badReport(id) && postedAt[id] > recSyncedAt[id];
+        bool shield = admitted && !_badReport(id) && postedHealth[id] != Health.Insane && postedAt[id] > recSyncedAt[id];
         return _recordKnown(id) && recPower[id] == 0 && recSyncedAt[id] >= syncedFrom && !shield;
     }
 
     /// The newest reading at or after `from`: a bad report of any age, even from before the enable
     /// floor (row B); a good report from before the enable floor, which may hide what it overwrote, so
-    /// it reads as unknown (row U); a fresh good report at or after the enable floor (row H); or the
+    /// it reads as unknown (row U); a stale or insane good report (row N); a fresh sane report (row H); or the
     /// voucher record (row VC). The newest wins; on a tie impairment wins, then the report. Unknown
     /// masks only health: a power-0 record under row U is impaired at any age (L-04). Unknown and no
-    /// reading both mean missing (0).
+    /// reading are distinct: 3 unknown, 0 missing (R4-00).
     function _verdictModel(uint256 id, uint256 from) internal view returns (uint8) {
-        uint8 rep = 3; // no report candidate
+        uint8 rep = 4; // no report candidate, distinct from verdict 3 unknown
         if (_reportBase(id) && postedAt[id] >= from) {
-            if (_badReport(id)) rep = 2;
-            else if (postedAt[id] < _enableFloor()) rep = 0;
-            else if (_fresh(id)) rep = 1;
+            if (_badReport(id)) {
+                rep = 2;
+            } else if (
+                pool.feedDisabled() || postedAt[id] < _enableFloor() || !_fresh(id) || postedHealth[id] == Health.Insane
+            ) {
+                rep = 3;
+            } else {
+                rep = 1;
+            }
         }
         bool rec = _recordKnown(id) && recSyncedAt[id] >= from;
         uint8 recV = recPower[id] == 0 ? 2 : 1;
-        if (rep == 3) return rec ? recV : 0;
-        if (rep == 0 && rec && recV == 2) return 2;
+        if (rep == 4) return rec ? recV : 0;
+        if (rep == 3 && rec && recV == 2) return 2;
         if (!rec || postedAt[id] > recSyncedAt[id]) return rep;
         if (recSyncedAt[id] > postedAt[id]) return recV;
         return rep == 2 || recV == 2 ? 2 : rep;
@@ -545,7 +598,7 @@ contract PoolHandler is Test {
             uint256[] memory ids = a.collateralOf();
             for (uint256 i; i < ids.length; ++i) {
                 uint8 v = _verdictModel(ids[i], from);
-                if (v == 2 || (ids[i] == m.rig && v != 1)) justified = false;
+                if (v >= 2 || (ids[i] == m.rig && v != 1)) justified = false;
             }
         }
         bytes4[] memory allowed = _four(
@@ -566,6 +619,98 @@ contract PoolHandler is Test {
             _checkPrice(ta0, s0);
         } else if (justified) {
             _violate("an expired flag with health evidence was not cleared");
+        }
+    }
+
+    /// R4-03: inspect the actual feed and voucher, independently of the handler's verdict model.
+    /// Returns 1 for a stored row B block, 2 for unresolved U, 3 for unresolved N, or 0 otherwise.
+    function _storedReportBlock(uint256 id, uint256 floor) internal view returns (uint8) {
+        RigReport memory r;
+        try feed.latest(id) returns (RigReport memory got, bool ok) {
+            if (!ok) return 0;
+            r = got;
+        } catch {
+            return 0;
+        }
+        if (r.rigId != id || r.observedAt < floor || r.observedAt > block.timestamp + CLOCK_SKEW) return 0;
+        bool bad = r.status != 1 || r.stopBlock != 0 || !r.custodied || r.verifWeight <= r.bonus;
+        bool rowU = pool.feedDisabled() || r.observedAt < uint256(pool.feedEnabledAt()) + CLOCK_SKEW;
+        bool notHealth = block.timestamp > uint256(r.observedAt) + REPORT_AGE || r.verifWeight == 0
+            || r.verifWeight > r.totalVerifWeight || r.bonus > r.verifWeight;
+        if (!bad && !rowU && !notHealth) return 0;
+        (bool readable, bytes memory answer) = address(voucher).staticcall(abi.encodeCall(MockVoucher.rigs, (id)));
+        if (readable && answer.length >= 128) {
+            (, uint64 at,, uint256 power) = abi.decode(answer, (address, uint64, uint256, uint256));
+            bool known = at <= block.timestamp + CLOCK_SKEW && at >= floor;
+            if (known && (at > r.observedAt || (!bad && rowU && power == 0))) return 0;
+        }
+        return bad ? 1 : (rowU ? 2 : 3);
+    }
+
+    /// Try the clear whenever raw stored evidence alone proves it must fail, in every brake state.
+    /// Counters qualify at the attempted call, not through `_verdictModel` or action hit labels.
+    function _checkStoredReportBlocks(RigAgent a) internal {
+        RigAgent.LoanView memory v = a.loanOf();
+        if (!v.open || v.impairedAt == 0 || !v.expired) return;
+        uint256 floor = uint256(v.impairedAt) + CURE + CLOCK_SKEW;
+        uint256[] memory ids = a.collateralOf();
+        bool blocked;
+        bool flaggedB;
+        bool otherB;
+        bool otherU;
+        bool flaggedN;
+        bool otherN;
+        for (uint256 i; i < ids.length; ++i) {
+            uint8 kind = _storedReportBlock(ids[i], floor);
+            if (kind == 0) continue;
+            blocked = true;
+            if (kind == 1 && ids[i] == v.impairedRig) flaggedB = true;
+            if (kind == 1 && ids[i] != v.impairedRig) otherB = true;
+            if (kind == 2 && ids[i] != v.impairedRig) otherU = true;
+            if (kind == 3 && ids[i] == v.impairedRig) flaggedN = true;
+            if (kind == 3 && ids[i] != v.impairedRig) otherN = true;
+        }
+        if (!blocked) return;
+        if (flaggedN) {
+            ++rowNFlagged;
+            _countReportBlock("TAPEPOOL_R4_FLAGGED_N");
+        }
+        if (otherN) {
+            ++rowNOther;
+            _countReportBlock("TAPEPOOL_R4_OTHER_N");
+        }
+        if (pool.feedDisabled()) {
+            if (flaggedB) {
+                ++brakeFlaggedB;
+                _countReportBlock("TAPEPOOL_R4_FLAGGED_B");
+            }
+            if (otherB) {
+                ++brakeOtherB;
+                _countReportBlock("TAPEPOOL_R4_OTHER_B");
+            }
+            if (otherU) {
+                ++brakeOtherU;
+                _countReportBlock("TAPEPOOL_R4_OTHER_U");
+            }
+        }
+        uint256 assets = pool.totalAssets();
+        uint256 doubtful = pool.doubtful();
+        bool cleared = _try(
+            "stored report clear refused",
+            keeper,
+            address(a),
+            abi.encodeCall(RigAgent.clearExpiredFlag, ()),
+            _one(RigAgent.NoHealthEvidence.selector)
+        );
+        if (cleared || pool.totalAssets() != assets || pool.doubtful() != doubtful) {
+            _violate("a stored report block restored doubtful assets");
+        }
+    }
+
+    /// Stateful invariant 16, checked after every action without sharing the verdict reference model.
+    function checkStoredReportBlocks() external {
+        for (uint256 i; i < agentList.length; ++i) {
+            _checkStoredReportBlocks(agentList[i]);
         }
     }
 
@@ -617,7 +762,7 @@ contract PoolHandler is Test {
                 seizedBy[address(a)][ids0[i]] = true;
             }
             _checkPrice(ta0, s0);
-            _checkSeizeReserve(a, reserveBefore, ta0);
+            _checkSeizeReserve(a, reserveBefore);
         } else if (justified && agentBal < debt0) {
             _violate("a seize was refused despite a live flag, an open window and evidence");
         }
@@ -897,14 +1042,21 @@ contract PoolHandler is Test {
         Bals memory b0 = _bals(a);
         uint256 ops = pool.opsFee(term > 1 ? 0 : term);
         expectedOwnerEth = owner.balance + ops;
+        uint256 base = pool.totalAssets();
         vm.deal(payer, payer.balance + ops);
         vm.prank(payer);
         try a.borrow{value: ops}(term, principal, type(uint256).max, type(uint16).max) {
             _hit("borrow");
+            if (!openedLoan) {
+                openedLoan = true;
+                _countReportBlock("TAPEPOOL_R4_LOAN_RUNS");
+            }
             borrowedAt[address(a)] = uint64(block.timestamp);
             evidenceFloor[address(a)] = uint64(block.timestamp);
             loanShare[address(a)] = uint16(pool.reserveShareBps());
             loanCap[address(a)] = uint16(pool.reserveCapBps());
+            loanBase[address(a)] = base;
+            if (pool.reserveBaseOf(address(a)) != base) _violate("reserve base was not captured at borrow");
             flagOf[address(a)].live = false;
             if (term > 1) _violate("borrow accepted a bad term");
             if (braked) _violate("borrow succeeded under a brake");
@@ -976,7 +1128,7 @@ contract PoolHandler is Test {
     struct SweepPre {
         uint256 outstanding;
         uint256 reserve;
-        uint256 totalAssets;
+        uint256 reserveBase;
         uint16 shareBps;
         uint16 capBps;
     }
@@ -988,12 +1140,17 @@ contract PoolHandler is Test {
         Bals memory b0 = _bals(a);
         RigAgent.LoanView memory v0 = a.loanOf();
         SweepPre memory pre = SweepPre(
-            pool.outstandingPrincipal(), pool.reserve(), pool.totalAssets(), loanShare[address(a)], loanCap[address(a)]
+            pool.outstandingPrincipal(),
+            pool.reserve(),
+            loanBase[address(a)],
+            loanShare[address(a)],
+            loanCap[address(a)]
         );
         if (!closed0 && v0.open) _checkLateModel(v0);
         bool success =
             _try("sweep", keeper, address(a), abi.encodeCall(RigAgent.sweep, ()), _one(RigAgent.NoLoan.selector));
         if (!success) return;
+        if (!closed0 && v0.open) _noteReserveBinding(pre, _min(b0.agent, v0.feeLeft + v0.lateFeeDue));
         _sync(a);
         Bals memory b1 = _bals(a);
         if (b1.borrower < b0.borrower || b1.pool < b0.pool) {
@@ -1045,7 +1202,7 @@ contract PoolHandler is Test {
         }
         if (pre.outstanding - pool.outstandingPrincipal() != prin) _violate("sweep booked the wrong principal");
         uint256 toReserve = feePart * pre.shareBps / 10_000;
-        uint256 cap = pre.totalAssets * pre.capBps / 10_000;
+        uint256 cap = pre.reserveBase * pre.capBps / 10_000;
         uint256 room = cap > pre.reserve ? cap - pre.reserve : 0;
         if (toReserve > room) toReserve = room;
         if (pool.reserve() != pre.reserve + toReserve) _violate("the fee was not split to the reserve as specified");
@@ -1061,27 +1218,77 @@ contract PoolHandler is Test {
         bem.approve(address(a), amt);
         uint256 keeperBefore = bem.balanceOf(keeper);
         SweepPre memory pre = SweepPre(
-            pool.outstandingPrincipal(), pool.reserve(), pool.totalAssets(), loanShare[address(a)], loanCap[address(a)]
+            pool.outstandingPrincipal(),
+            pool.reserve(),
+            loanBase[address(a)],
+            loanShare[address(a)],
+            loanCap[address(a)]
         );
+        RigAgent.LoanView memory v = a.loanOf();
+        uint256 fees;
+        if (v.open) {
+            uint256 bal = bem.balanceOf(address(a));
+            uint256 pull = v.debt > bal ? _min(amt, v.debt - bal) : 0;
+            fees = _min(bal + pull, v.feeLeft + v.lateFeeDue);
+        }
         bool success =
             _try("repay", payer, address(a), abi.encodeCall(RigAgent.repay, (amt)), _one(RigAgent.NoLoan.selector));
         if (!success) return;
+        if (v.open) _noteReserveBinding(pre, fees);
         _sync(a);
         if (bem.balanceOf(address(a)) != 0) _violate("BEM stranded in the agent after repay");
         if (bem.balanceOf(keeper) != keeperBefore) _violate("repay paid a third party");
         _checkReserveCap(pre);
     }
 
-    /// Q10: a repayment grows the reserve only up to the cap measured on `totalAssets` before it. Not a
-    /// global invariant: `markDoubtful` lowers `totalAssets` later without touching the reserve.
-    function _checkSeizeReserve(RigAgent a, uint256 reserveBefore, uint256 ta0) internal {
-        _checkReserveCap(SweepPre(0, reserveBefore, ta0, loanShare[address(a)], loanCap[address(a)]));
+    /// R4-04: repayments use the base this handler captured at borrow, also through seizure.
+    function _checkSeizeReserve(RigAgent a, uint256 reserveBefore) internal {
+        _checkReserveCap(SweepPre(0, reserveBefore, loanBase[address(a)], loanShare[address(a)], loanCap[address(a)]));
     }
 
     function _checkReserveCap(SweepPre memory pre) internal {
-        uint256 cap = pre.totalAssets * pre.capBps / 10_000;
+        uint256 cap = pre.reserveBase * pre.capBps / 10_000;
         if (pool.reserve() > pre.reserve && pool.reserve() > cap) {
             _violate("a repayment grew the reserve past its cap");
+        }
+    }
+
+    function _noteReserveBinding(SweepPre memory pre, uint256 fees) internal {
+        uint256 cap = pre.reserveBase * pre.capBps / 10_000;
+        uint256 room = cap > pre.reserve ? cap - pre.reserve : 0;
+        if (fees * pre.shareBps / 10_000 <= room) return;
+        ++bindingReservePayments;
+        _countReportBlock("TAPEPOOL_R4_CAPPED_REPAY");
+    }
+
+    /// R4-04: prepare a real loan with a small positive cap, then pay fees whose reserve share
+    /// exceeds its remaining room. Governance, onboarding, borrow and repay are separate steps.
+    function bindReserveCap(uint256 seed) external {
+        for (uint256 i; i < agentList.length; ++i) {
+            RigAgent a = agentList[i];
+            if (!a.hasLoan() || loanCap[address(a)] != 1 || loanShare[address(a)] != 5_000) continue;
+            RigAgent.LoanView memory v = a.loanOf();
+            uint256 fees = _min(v.feeLeft + v.lateFeeDue, 4 * BEM);
+            uint256 cap = loanBase[address(a)] / 10_000;
+            uint256 room = cap > pool.reserve() ? cap - pool.reserve() : 0;
+            if (fees / 2 <= room) continue;
+            this.repay(i, fees);
+            _hit("bindReserveCap");
+            return;
+        }
+        if (pool.reserveCapBps() != 1) {
+            this.queueAndExecuteParam(21, 1);
+            return;
+        }
+        if (pool.reserveShareBps() != 5_000) {
+            this.queueAndExecuteParam(19, 5_000);
+            return;
+        }
+        (RigAgent candidate, bool ok) = _pickFor(seed, 2);
+        if (ok && _canBorrow(candidate) && (candidate.collateralOf().length >= 2 || touched.length == N_RIGS)) {
+            this.borrow(seed, 2, 300_000_001);
+        } else if (voucher.mode() == MockVoucher.Mode.Normal) {
+            this.bootstrap(seed, 0, 100);
         }
     }
 
@@ -1199,6 +1406,136 @@ contract PoolHandler is Test {
         if (!ok) return;
         _maybeRefresh(aSeed);
         _clearCall(a);
+    }
+
+    /// Prepare at most one step per action. Onboarding only uses a normally transferring voucher;
+    /// the standalone transfer actions still exercise its gas-burning and lying modes.
+    function _prepareBrakeLoan(uint256 seed) internal {
+        (RigAgent a, bool ok) = _pickFor(seed, 2);
+        if (ok && _canBorrow(a) && (a.collateralOf().length >= 2 || touched.length == N_RIGS)) {
+            this.borrow(seed, 2, 0);
+        } else if (voucher.mode() == MockVoucher.Mode.Normal) {
+            this.bootstrap(seed, 0, 100);
+        }
+    }
+
+    /// R4-07: progress toward a two-rig loan, restoring at most one brake or preparing one step.
+    /// Ordinary borrow actions still test refusal under brakes and malformed inputs.
+    function openLoan() external {
+        (RigAgent a, bool ok) = _pickFor(0, 1);
+        if (ok && a.hasLoan()) return;
+        if (pool.policySwapQueued()) return;
+        if (pool.borrowsPaused()) {
+            vm.prank(owner);
+            pool.unpauseBorrows();
+            return;
+        }
+        if (pool.feedDisabled()) {
+            _enableFeed();
+            return;
+        }
+        if (_settling()) {
+            vm.warp(uint256(enabledAt) + CLOCK_SKEW + REPORT_AGE);
+            return;
+        }
+        _prepareBrakeLoan(0);
+    }
+
+    /// R4-03: expire a flag before a brake, preserve an older positive record, and try the clear on
+    /// row B (flagged or another rig) or a brake-time overwrite to row U on another rig.
+    function expireBrakeClear(uint256 aSeed, uint256 scenario) external {
+        (RigAgent a, bool ok) = _pickFor(aSeed, 1);
+        if (!ok || !a.hasLoan()) {
+            _prepareBrakeLoan(aSeed);
+            return; // never continue into flag/expiry work after an onboarding or borrow call
+        }
+        _healInputs();
+        if (pool.feedDisabled()) _enableFeed();
+        uint256[] memory ids = a.collateralOf();
+        if (ids.length == 0) return;
+        FlagModel storage m = flagOf[address(a)];
+        if (!m.live) {
+            uint256 from = _flagFloor(a);
+            if (from < _enableFloor()) from = _enableFloor();
+            if (block.timestamp < from) vm.warp(from);
+            health[ids[0]] = Health.Stopped;
+            _postAt(ids[0], uint64(block.timestamp), false);
+            _flagCall(a, ids[0]);
+        }
+        if (!a.hasLoan() || !m.live) return;
+        uint256 expiry = _deadline(m) + 1;
+        if (block.timestamp < expiry) vm.warp(expiry);
+        vm.warp(block.timestamp + CLOCK_SKEW + 1);
+        uint64 at = uint64(block.timestamp);
+        for (uint256 i; i < ids.length; ++i) {
+            health[ids[i]] = Health.Healthy;
+            _postAt(ids[i], at, false);
+            voucher.setRig(ids[i], at + 1, uint256(baseOf[ids[i]]) + 10);
+            recSyncedAt[ids[i]] = at + 1;
+            recPower[ids[i]] = uint256(baseOf[ids[i]]) + 10;
+        }
+        uint256 blocked = m.rig;
+        if (scenario % 3 != 0 && ids.length > 1) blocked = ids[0] == m.rig ? ids[1] : ids[0];
+        health[blocked] = Health.Stopped;
+        _postAt(blocked, at + 2, false);
+        vm.warp(uint256(at) + 2);
+        _disableFeed();
+        if (scenario % 3 == 2 && blocked != m.rig) {
+            vm.warp(block.timestamp + 1);
+            health[blocked] = Health.Healthy;
+            _postAt(blocked, uint64(block.timestamp), false); // overwrites B with U, without a harvest
+        }
+        _checkStoredReportBlocks(a);
+        _clearCall(a);
+        _hit("expireBrakeClear");
+    }
+
+    /// R4-08: replace B with stale or insane non-impaired N, without syncing a newer record.
+    /// Other rigs have newer positive records, so the selected rig alone blocks the expired clear.
+    function expireRowNClear(uint256 aSeed, uint256 scenario) external {
+        (RigAgent a, bool ok) = _pickFor(aSeed, 1);
+        if (!ok || !a.hasLoan()) {
+            _prepareBrakeLoan(aSeed);
+            return;
+        }
+        _healInputs();
+        if (pool.feedDisabled()) _enableFeed();
+        uint256[] memory ids = a.collateralOf();
+        if (ids.length == 0) return;
+        FlagModel storage m = flagOf[address(a)];
+        if (!m.live) {
+            uint256 from = _flagFloor(a);
+            if (from < _enableFloor()) from = _enableFloor();
+            if (block.timestamp < from) vm.warp(from);
+            health[ids[0]] = Health.Stopped;
+            _postAt(ids[0], uint64(block.timestamp), false);
+            _flagCall(a, ids[0]);
+        }
+        if (!a.hasLoan() || !m.live) return;
+        uint256 expiry = _deadline(m) + 1;
+        if (block.timestamp < expiry) vm.warp(expiry);
+        if (block.timestamp < _enableFloor()) vm.warp(_enableFloor());
+        uint64 at = uint64(block.timestamp);
+        for (uint256 i; i < ids.length; ++i) {
+            health[ids[i]] = Health.Healthy;
+            _postAt(ids[i], at, false);
+            voucher.setRig(ids[i], at + 1, uint256(baseOf[ids[i]]) + 10);
+            recSyncedAt[ids[i]] = at + 1;
+            recPower[ids[i]] = uint256(baseOf[ids[i]]) + 10;
+        }
+        uint256 blocked = m.rig;
+        if (scenario % 2 != 0 && ids.length > 1) blocked = ids[0] == m.rig ? ids[1] : ids[0];
+        vm.warp(uint256(at) + 2);
+        health[blocked] = Health.Stopped;
+        _postAt(blocked, at + 2, false);
+        _checkStoredReportBlocks(a);
+        vm.warp(uint256(at) + 3);
+        health[blocked] = scenario % 4 < 2 ? Health.Healthy : Health.Insane;
+        if (scenario % 4 < 2) vm.warp(uint256(at) + 3 + REPORT_AGE + 1);
+        _postAt(blocked, at + 3, false);
+        _checkStoredReportBlocks(a);
+        _clearCall(a);
+        _hit("expireRowNClear");
     }
 
     function warpToSeizeWindow(uint256 aSeed) external {
@@ -1608,6 +1945,7 @@ contract RedeployHandler is Test {
     uint256 public seedShares = 10e8 * 1e6;
     uint256 public ordinaryShares;
     uint256[3] public principal;
+    uint256[3] public reserveBase;
     uint256[3] public marked;
     uint256[3] public absorbed;
     uint16[3] internal shareTerms;
@@ -1773,6 +2111,7 @@ contract RedeployHandler is Test {
             pool.lend(amount);
         } else {
             _syncModel();
+            reserveBase[i] = _assets();
             vm.prank(address(agents[i]));
             pool.lend(amount);
             modelTracked -= amount;
@@ -1791,7 +2130,8 @@ contract RedeployHandler is Test {
         fees = bound(fees, 0, 1e8);
         amount = bound(amount, 0, principal[i]);
         _syncModel();
-        uint256 toReserve = _min(fees * shareTerms[i] / 10_000, _room(_assets() * capTerms[i] / 10_000, modelReserve));
+        uint256 toReserve =
+            _min(fees * shareTerms[i] / 10_000, _room(reserveBase[i] * capTerms[i] / 10_000, modelReserve));
         uint256 cut = _min(marked[i], amount);
         marked[i] -= cut;
         principal[i] -= amount;
@@ -1805,6 +2145,7 @@ contract RedeployHandler is Test {
         modelReserve += toReserve;
         _book(fees - toReserve);
         if (principal[i] == 0) {
+            reserveBase[i] = 0;
             shareTerms[i] = 0;
             capTerms[i] = 0;
         }
@@ -1833,6 +2174,7 @@ contract RedeployHandler is Test {
             _restore(i, back);
         } else {
             pool.writeOff();
+            reserveBase[i] = 0;
             modelReserve -= _min(modelReserve, principal[i]);
             principal[i] = 0;
             marked[i] = 0;
@@ -1931,6 +2273,7 @@ contract RedeployHandler is Test {
         for (uint256 i; i < 3; ++i) {
             address agent = address(agents[i]);
             assertEq(pool.loanPrincipalOf(agent), principal[i]);
+            assertEq(pool.reserveBaseOf(agent), reserveBase[i]);
             assertEq(pool.doubtfulOf(agent), marked[i]);
             assertEq(pool.absorbedOf(agent), absorbed[i]);
             assertLe(absorbed[i], marked[i]);

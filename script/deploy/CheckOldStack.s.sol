@@ -14,10 +14,10 @@ contract CheckOldStack is Script {
     /// @notice Holder of the old pool's dead seed, whose shares stay there for good (SPEC-REDEPLOY-3 §7.3).
     address internal constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
-    /// @notice Check the 2026-10-31 stack that redeploy 3 retires (RD3-06), from its factory deployment block
+    /// @notice Check the 2026-11-02 stack that redeploy 4 retires (RD4-08), from its factory deployment block
     ///         to the current block.
     function run() external {
-        check(A.TAPE_POOL_2, A.AGENT_FACTORY_2, A.FACTORY_DEPLOY_BLOCK_2);
+        check(A.TAPE_POOL_3, A.AGENT_FACTORY_3, A.FACTORY_DEPLOY_BLOCK_3);
     }
 
     /// @notice Check one old stack: admission closed, no shares left but the dead seed's, no obligation, no
@@ -31,7 +31,7 @@ contract CheckOldStack is Script {
         require(pool.outstandingPrincipal() == 0 && pool.doubtful() == 0, "old obligations");
         require(IRigVoucher(A.RIG_VOUCHER).balanceOf(poolAddress) == 0, "old pool has vouchers");
         require(address(pool.pendingPolicy()) == address(0), "old policy queued");
-        // The 2026-10-31 pool has the same 14 parameters as this build.
+        // The 2026-11-02 pool has the same 14 parameters as this build.
         for (uint256 key; key <= uint256(type(TapePool.Param).max); ++key) {
             (, uint64 eta) = pool.queued(TapePool.Param(key));
             require(eta == 0, "old parameter queued");

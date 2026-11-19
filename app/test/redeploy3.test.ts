@@ -108,13 +108,9 @@ describe('RC3-02 the page banner and status while the feed settles', () => {
     });
   }
 
-  it('says why in the borrow summary and in the footer status instead of an empty or open state', () => {
+  it('says why in the borrow summary instead of an empty state', () => {
     const m = make('feed-settling');
     mustNot(m.text, 'Choose a ready rig to see your advance and its full cost.', 'summary empty state');
-    must(m.text, 'Borrows reopen in a few minutes', 'footer status');
-    mustNot(m.text, 'Borrows open', 'footer open status');
-    must(make('feed-settling', { lang: 'cn' }).text, '借款将在几分钟后恢复', 'footer status cn');
-    must(make('connected').text, 'Borrows open', 'footer outside the window');
   });
 });
 

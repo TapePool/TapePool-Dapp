@@ -13,6 +13,8 @@ struct RigReport {
     uint8 status; // 1 = active
     bool custodied; // the vault cell still owns the circuit NFT (false after a rescue)
     uint64 verifWeight;
+    /// @notice Weight that does not survive the loss of the design bonus, in `verifWeight` units;
+    ///         not PodMining's `bonus`.
     uint64 bonus;
     uint64 totalVerifWeight; // PodMining total verified weight at the same read
     uint64 bscBlock;

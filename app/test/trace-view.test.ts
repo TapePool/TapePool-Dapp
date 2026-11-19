@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createTraceSession } from '../src/dev/trace/view';
+import { createTraceSession } from '../src/tape/view';
 import { morph } from '../src/dom';
-import { KEEP, money, payout, UNIT } from '../src/dev/trace/engine';
-import type { FeedState, PriceFeed } from '../src/dev/trace/feed';
+import { KEEP, money, payout, UNIT } from '../src/tape/engine';
+import type { FeedState, PriceFeed } from '../src/tape/feed';
 
 /** The opening index price in ticks: $110.50. */
 const OPEN = 110_500;

@@ -170,7 +170,7 @@ describe.skipIf(process.env.KEEPER_ANVIL !== "1").sequential("redeploy keeper on
       await write(s.d.pool, artifact("TapePool", "TapePool").abi, "disableFeed");
       expect((await s.loan()).expired).toBe(true);
       await s.impairment();
-      expect(s.alerts.some((s) => s.includes("expired impairment flag while the feed is disabled"))).toBe(true);
+      expect(s.alerts.some((s) => s.includes("rig 16 blocks or has an unreadable clear source (missing)"))).toBe(true);
       expect((await s.loan()).impairedAt).toBe(flagged.impairedAt);
     } finally { await local.revert({ id: snapshot }); }
   });

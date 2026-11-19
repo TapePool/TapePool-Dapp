@@ -1,0 +1,7 @@
+{
+  "clearPair": [
+    {"case":"feed off: unknown other rig","flaggedVerdict":1,"otherVerdict":3,"allowed":false,"id":"7","flaggedId":"8","now":"1800000000","floor":"1799913600","feedDisabled":true,"feedEnabledAt":"0","report":{"ok":true,"reverts":false,"rigId":"7","observedAt":"1799999990","status":1,"stopBlock":"0","custodied":true,"verifWeight":"110","bonus":"10","totalVerifWeight":"1579201"},"record":{"readable":true,"syncedAt":"1799913600","power":"110"}},
+    {"case":"stale N on other rig","flaggedVerdict":1,"otherVerdict":3,"allowed":false,"id":"7","flaggedId":"8","now":"1800000000","floor":"1799913600","feedDisabled":false,"feedEnabledAt":"0","report":{"ok":true,"reverts":false,"rigId":"7","observedAt":"1799913602","status":1,"stopBlock":"0","custodied":true,"verifWeight":"110","bonus":"10","totalVerifWeight":"1579201"},"record":{"readable":true,"syncedAt":"1799913600","power":"110"}},
+    {"case":"newer record resolves N on other rig","flaggedVerdict":1,"otherVerdict":1,"allowed":true,"id":"7","flaggedId":"8","now":"1800000000","floor":"1799913600","feedDisabled":false,"feedEnabledAt":"0","report":{"ok":true,"reverts":false,"rigId":"7","observedAt":"1799913602","status":1,"stopBlock":"0","custodied":true,"verifWeight":"110","bonus":"10","totalVerifWeight":"1579201"},"record":{"readable":true,"syncedAt":"1799913603","power":"110"}}
+  ]
+}

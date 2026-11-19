@@ -1,0 +1,8 @@
+[
+  {"mult":"1","bstar":"24","rawBonus":"3752","verifWeight":"48","bonus":"24","base":"24"},
+  {"mult":"6","bstar":"4","rawBonus":"3752","verifWeight":"456","bonus":"432","base":"24"},
+  {"mult":"0","bstar":"4","rawBonus":"3752","verifWeight":"456","bonus":"456","base":"0"},
+  {"mult":"6","bstar":"0","rawBonus":"3752","verifWeight":"456","bonus":"456","base":"0"},
+  {"mult":"6","bstar":"79","rawBonus":"3752","verifWeight":"0","bonus":"0","base":"0"},
+  {"mult":"6","bstar":"4","rawBonus":"3752","verifWeight":"12","bonus":"0","base":"12"}
+]

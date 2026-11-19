@@ -17,7 +17,7 @@ import {
 import { EMPTY, html, join, type Html } from '../html';
 import { t } from '../i18n';
 import { errorText, limitText } from '../chain/errors';
-import { debtBarPct, isRoomReason, type BorrowView } from '../logic/borrow';
+import { debtBarPct, isSettlingReason, type BorrowView } from '../logic/borrow';
 import type { ParamKey, QueuedChange, RigView } from '../model';
 import { step2Body, step3Body, reviewRow, reviewSentence } from './mined';
 import { act, actLink, bar, chip, cl, img, proc, soon, soonTip, tip, type Ctx } from './ui';
@@ -165,13 +165,13 @@ function summary(c: Ctx, b: BorrowView): Html {
   const lim = b.limits[b.term];
   const days = p.termDays[b.term];
   const head = html`<div class="v2-card-h"><h2 id="q1"><span class="uid" aria-hidden="true">Q</span>${t('Your borrow', '借款摘要')}</h2><span>${ruleChip(b)}</span></div>`;
-  // while the feed settles after a re-enable the room is 0, so the lens can only say the pool has no room and the
-  // estimate finds nothing to borrow: say why instead (RC3-02)
-  const roomOnly = b.source === 'quote' && b.quote ? isRoomReason(b.quote.reason) : b.limits.every((l) => l.maxPrincipal < p.minAdvance);
+  // FEED_OFF means settling only inside the re-enable window, for maximum and principal quotes alike (RC4-04).
+  const reason = b.quote?.reason || (b.principalQuote?.reason === 8 ? 8 : 0);
+  const roomOnly = b.source === 'quote' && b.quote ? isSettlingReason(reason) : b.limits.every((l) => l.maxPrincipal < p.minAdvance);
   if (b.settling && roomOnly)
     return html`<section class="v2-card" aria-labelledby="q1">${head}<div class="v2-card-b">${cl('w', errorText({ kind: 'revert', name: 'FeedSettling' }))}</div></section>`;
-  if (b.source === 'quote' && b.quote && b.quote.reason !== 0)
-    return html`<section class="v2-card" aria-labelledby="q1">${head}<div class="v2-card-b">${cl('w', errorText({ kind: 'quote', reason: b.quote.reason, params: { minAdvance: bemTrim(p.minAdvance), inputBits: b.quote.inputBits, terms: p.termDays, eta: snap.pool.pendingPolicy ? fd(snap.pool.pendingPolicy.eta, true) : undefined } }))}</div></section>`;
+  if (b.source === 'quote' && b.quote && reason !== 0)
+    return html`<section class="v2-card" aria-labelledby="q1">${head}<div class="v2-card-b">${cl('w', errorText({ kind: 'quote', reason, params: { minAdvance: bemTrim(p.minAdvance), inputBits: b.quote.inputBits, terms: p.termDays, eta: snap.pool.pendingPolicy ? fd(snap.pool.pendingPolicy.eta, true) : undefined } }))}</div></section>`;
   if (lim.maxPrincipal < p.minAdvance && b.limits.every((l) => l.maxPrincipal < p.minAdvance))
     return html`<section class="v2-card" aria-labelledby="q1">${head}<div class="empty">${t('Choose a ready rig to see your advance and its full cost.', '选择一台可借的矿机，查看可借金额和全部成本。')}</div></section>`;
   const maturity = c.now + days * DAY;

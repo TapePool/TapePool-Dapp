@@ -20,7 +20,7 @@ const SHOWS: Record<string, [string, string][]> = {
   'feed-settling': [['Borrowing reopens a few minutes after the data feed is turned back on.', '数据源重新开启后，借款将在几分钟后恢复。']],
   'swap-queued': [['A new credit rule is queued.', '新信用规则排队中。'], ['stay paused until the owner resumes them', '切换后需由所有者恢复借款']],
   'no-room': [['The pool has no room for a new advance right now.', '资金池当前没有可借额度。']],
-  'deposits-closed': [['Deposits closed', '存款暂停']],
+  'deposits-closed': [['Deposits are closed while a loan is under review.', '有贷款处于待处理状态，存款暂停']],
   'fee-queued': [['An operating fee change is queued.', '运营费变更排队中。'], ['once someone executes it after', '有人执行即对新借款生效']],
   'ops-fee-zero': [['Cost in BEM', 'BEM 成本']],
   'loan-active': [['Repay with BEM', '用 BEM 还款'], ['WHERE REPAYMENT COMES FROM', '还款来源'], ['when output covers the debt · at the latest', '产出足以还清时 · 最迟'], ['Estimated repaid', '预计还清'], ['The design bonus can make it sooner', '设计加成可能使其提前'], ['mined, not yet harvested (after the bridge fee) · the keeper harvests at 100.5%', '（扣除跨链费） · 达到 100.5% 时 keeper 领取'], ['it reaches the loan when the keeper harvests it', 'keeper 领取后才会用于还款']],

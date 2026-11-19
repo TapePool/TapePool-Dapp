@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { Engine, KEEP, payout, ROW, UNIT } from '../src/dev/trace/engine';
+import { Engine, KEEP, payout, ROW, UNIT } from '../src/tape/engine';
 
 /** An engine opened on a flat $110.50 history. */
 function opened(): Engine { const g = new Engine(); g.reset(Array.from({ length: KEEP }, () => 110_500)); return g; }
-import { CELL, MAX_EFFECTS, MAX_RESULTS, NOTICE_MS, PLACEMENT_MS, RESULT_KEEP, RESULT_MS, Presentation, projectX, projectY, sampleAt, targetBounds } from '../src/dev/trace/presentation';
+import { CELL, MAX_EFFECTS, MAX_RESULTS, NOTICE_MS, PLACEMENT_MS, RESULT_KEEP, RESULT_MS, Presentation, projectX, projectY, sampleAt, targetBounds } from '../src/tape/presentation';
 import { parseHash } from '../src/route';
 
 describe('Tape presentation', () => {

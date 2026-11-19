@@ -107,10 +107,11 @@ contract Redeploy3StoredImpairedTest is Base {
         pool.disableFeed();
         vm.warp(block.timestamp + 1 hours);
         feed.set(_impairedAt(uint64(block.timestamp))); // observed during the brake
-        // while the feed is off no report row applies: the record decides
+        // R4-00: row B also blocks while the feed is off.
         uint256 snap = vm.snapshotState();
+        vm.expectRevert(RigAgent.NoHealthEvidence.selector);
         a.clearExpiredFlag();
-        assertEq(pool.doubtful(), 0);
+        assertEq(pool.doubtful(), BEM);
         vm.revertToState(snap);
         vm.warp(block.timestamp + 10 minutes);
         vm.prank(owner);
@@ -211,7 +212,7 @@ contract Redeploy3StoredImpairedTest is Base {
         uint64 enableFloor = _brakeAndEnable();
         uint64 u = enableFloor - 1;
         feed.set(_healthyAt(u));
-        voucher.setRig(ID, u, 110); // tie, positive: missing
+        voucher.setRig(ID, u, 110); // tie, positive: unknown
         vm.expectRevert(RigAgent.NoHealthEvidence.selector);
         a.clearExpiredFlag();
         voucher.setRig(ID, u, 0); // tie, power 0: impaired
@@ -225,8 +226,8 @@ contract Redeploy3StoredImpairedTest is Base {
         assertEq(pool.doubtful(), 0);
     }
 
-    /// On a rig other than the flagged one, row U reads as missing and does not block, unless a
-    /// power-0 record ties with it, is newer or is older (impaired: unknown masks only health, L-04).
+    /// R4-00: row U blocks on every rig, until a newer record decides. A power-0 record at any age
+    /// still blocks as impaired (unknown masks only health, L-04).
     function test_R3_05_rowU_onAnotherRigBlocksOnlyWhenTheRecordIsImpaired() public {
         RigAgent a = _ready(alice, ID);
         _rig(alice, 8, 100);
@@ -244,7 +245,7 @@ contract Redeploy3StoredImpairedTest is Base {
         feed.set(other); // rig 8: row U
         uint8[5] memory powers = [uint8(110), 0, 0, 110, 0];
         uint64[5] memory synced = [u, u, u + 1, u + 1, u - 1];
-        bool[5] memory clears = [true, false, false, true, false];
+        bool[5] memory clears = [false, false, false, true, false];
         for (uint256 i; i < 5; ++i) {
             uint256 snap = vm.snapshotState();
             voucher.setRig(8, synced[i], powers[i]);

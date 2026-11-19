@@ -12,6 +12,8 @@ import {TapePool} from "../../src/TapePool.sol";
 import {TapeLens} from "../../src/TapeLens.sol";
 import {RigAgent} from "../../src/RigAgent.sol";
 import {CreditMath} from "../../src/libraries/CreditMath.sol";
+import {BscRigReader} from "../../src/feed/BscRigReader.sol";
+import {IRigVaultBsc, IPodMining, Miner} from "../../src/interfaces/IBsc.sol";
 
 /// Stand-ins for the contracts the pool's constructor probes. They hold no logic the vectors depend on.
 contract VecBem is ERC20 {
@@ -56,6 +58,10 @@ contract VecPolicy is ICreditPolicy {
 /// Stand-ins for the evidence vectors (SPEC-REDEPLOY-3 R3-00): a pool's feed state, one stored report and one
 /// `rigs(id)` answer, each set per vector.
 contract VecFeedState {
+    function expiryOf(uint64) external pure returns (uint64) {
+        return 1;
+    }
+    function clearDoubtful() external pure {}
     bool public feedDisabled;
     uint64 public feedEnabledAt;
 
@@ -111,12 +117,22 @@ contract VecAgent is RigAgent {
         RigAgent(pool_, voucher_, IERC20(address(0)), feed_)
     {}
 
+    /// Seed an expired two-rig flag; the production clear predicate still decides its outcome.
+    function preparePair(uint64 flaggedAt) external {
+        delete _collateral;
+        _collateral.push(7);
+        _collateral.push(8);
+        _loan.start = flaggedAt;
+        _loan.impairedAt = flaggedAt;
+        _loan.impairedRig = 8;
+    }
+
     /// Evidence kind for a flag or a seize with the caller's floor: 0 none, 1 row E, 2 row VE.
     function evidenceKind(uint256 id, uint256 floor) external view returns (uint8) {
         return _impairment(id, floor, _feedState());
     }
 
-    /// Clear verdict with the clear floor: 0 missing, 1 healthy, 2 impaired (rows H, B, U and VC).
+    /// Clear verdict with the clear floor: 0 missing, 1 healthy, 2 impaired, 3 unknown (R4-00).
     function verdict(uint256 id, uint256 floor) external view returns (uint8) {
         return _verdict(id, floor, _feedState());
     }
@@ -168,6 +184,10 @@ contract ParityVectors is Script {
 
         // appended last, so every earlier vector stays byte for byte as before
         _evidence();
+        _brakeVectors();
+        _bonusVectors();
+        _rowN();
+        _rowNPairs();
     }
 
     // ───────────────────────── CreditMath
@@ -505,7 +525,7 @@ contract ParityVectors is Script {
         c.syncedAt = T - 40;
         c.r.observedAt = T - 41;
         _ev(c);
-        c = _dflt("U", "feed disabled: the record decides alone");
+        c = _dflt("U", "feed disabled: row U masks the older positive record");
         c.feedDisabled = true;
         c.feedEnabledAt = T - 100;
         c.syncedAt = F;
@@ -857,6 +877,171 @@ contract ParityVectors is Script {
 
     // ───────────────────────── plumbing
 
+    /// R4-00: appended brake-time B/U cases leave historical vector order intact.
+    function _brakeVectors() internal {
+        for (uint256 row; row < 2; ++row) {
+            Case memory c = _dflt(row == 0 ? "B" : "U", "feed off");
+            c.feedDisabled = true;
+            c.syncedAt = F;
+            if (row == 0) c = _impaired(c);
+            for (uint256 reading; reading < 4; ++reading) {
+                if (reading == 1) c.syncedAt = c.r.observedAt;
+                if (reading == 2) c.syncedAt = c.r.observedAt + 1;
+                if (reading == 3) c.syncedAt = F;
+                c.power = reading == 3 ? 0 : 110;
+                c.name = string.concat("feed off: record variant ", vm.toString(reading));
+                _ev(c);
+                uint8 expected = reading == 2 ? 1 : (row == 0 || reading == 3 ? 2 : 3);
+                require(agent.verdict(RIG, c.floor) == expected, "brake vector verdict");
+            }
+        }
+        Case memory c = _dflt("U", "unknown on the other rig blocks a clear");
+        c.feedDisabled = true;
+        c.syncedAt = F;
+        vm.warp(T);
+        state.set(true, 0);
+        feed.set(c.r, true, false);
+        voucher.set(true, F, 110);
+        // Rig 8 has no matching report; its positive record decides alone.
+        agent.preparePair(F - 72 hours - 60);
+        uint8 flagged = agent.verdict(8, F);
+        uint8 other = agent.verdict(7, F);
+        (bool allowed, bytes memory reason) = address(agent).call(abi.encodeCall(RigAgent.clearExpiredFlag, ()));
+        require(flagged == 1 && other == 3 && !allowed, "unknown other rig must block");
+        require(bytes4(reason) == RigAgent.NoHealthEvidence.selector, "clear failed for another reason");
+        _emit(
+            string.concat(
+                '{"k":"clearPair","case":"feed off: unknown other rig","flaggedVerdict":',
+                vm.toString(uint256(flagged)),
+                ',"otherVerdict":',
+                vm.toString(uint256(other)),
+                ',"allowed":',
+                vm.toString(allowed),
+                ',"id":"7","flaggedId":"8","now":"1800000000","floor":"1799913600","feedDisabled":true,"feedEnabledAt":"0","report":',
+                _evReport(c),
+                ',"record":',
+                _evRecord(c),
+                "}"
+            )
+        );
+    }
+
+    /// R4-08: N has U's record precedence; every earlier vector retains its order.
+    function _rowN() internal {
+        for (uint256 mode; mode < 2; ++mode) {
+            for (uint256 reading; reading < 7; ++reading) {
+                Case memory c = _dflt("N", "");
+                c.name = string.concat(mode == 0 ? "stale" : "insane", ": record variant ", vm.toString(reading));
+                c.r.observedAt = mode == 0 ? F + 2 : T;
+                if (mode == 1) c.r.totalVerifWeight = 0;
+                c.readable = reading != 0;
+                if (reading == 1) c.syncedAt = F - 1;
+                if (reading == 2 || reading == 6) c.syncedAt = F;
+                if (reading == 3) c.syncedAt = c.r.observedAt - 1;
+                if (reading == 4) c.syncedAt = c.r.observedAt;
+                if (reading == 5) c.syncedAt = c.r.observedAt + 1;
+                if (reading == 6) c.power = 0;
+                uint8 want = reading == 5 ? 1 : (reading == 6 ? 2 : 3);
+                _nEv(c, want, mode == 1 && reading == 6 ? 2 : 0);
+            }
+        }
+        Case memory c = _dflt("N", "age 300 is H");
+        c.r.observedAt = T - 300;
+        _nEv(c, 1, 0);
+        c.name = "age 301 is N";
+        c.r.observedAt = T - 301;
+        _nEv(c, 3, 0);
+        c.name = "enableFloor - 1 stays U";
+        c.feedEnabledAt = c.r.observedAt - 59;
+        _nEv(c, 3, 0);
+        c.name = "feed off stays U";
+        c.feedEnabledAt = 0;
+        c.feedDisabled = true;
+        _nEv(c, 3, 0);
+        c = _dflt("N", "insane at now + 60 admitted");
+        c.r.totalVerifWeight = 0;
+        c.r.observedAt = T + 60;
+        _nEv(c, 3, 0);
+        c.name = "insane at now + 61 is no candidate";
+        c.r.observedAt = T + 61;
+        _nEv(c, 0, 0);
+        c.name = "floor - 1 is no candidate";
+        c.r.observedAt = F - 1;
+        _nEv(c, 0, 0);
+        c.name = "at floor is N";
+        c.r.observedAt = F;
+        _nEv(c, 3, 0);
+    }
+
+    function _nEv(Case memory c, uint8 verdict, uint8 kind) internal {
+        _ev(c);
+        require(agent.verdict(RIG, c.floor) == verdict, "row N verdict");
+        require(agent.evidenceKind(RIG, c.floor) == kind, "row N evidence");
+    }
+
+    /// The same two-rig clear before and after a record newer than N arrives on the other rig.
+    function _rowNPairs() internal {
+        for (uint256 reading; reading < 2; ++reading) {
+            Case memory c = _dflt("N", reading == 0 ? "stale N on other rig" : "newer record resolves N on other rig");
+            c.r.observedAt = F + 2;
+            c.syncedAt = reading == 0 ? F : F + 3;
+            vm.warp(T);
+            state.set(false, 0);
+            feed.set(c.r, true, false);
+            voucher.set(true, c.syncedAt, 110);
+            agent.preparePair(F - 72 hours - 60);
+            uint8 flagged = agent.verdict(8, F);
+            uint8 other = agent.verdict(7, F);
+            (bool allowed, bytes memory reason) = address(agent).call(abi.encodeCall(RigAgent.clearExpiredFlag, ()));
+            require(flagged == 1 && other == (reading == 0 ? 3 : 1) && allowed == (reading == 1), "row N pair");
+            if (!allowed) require(bytes4(reason) == RigAgent.NoHealthEvidence.selector, "row N clear reason");
+            _emit(
+                string.concat(
+                    '{"k":"clearPair","case":"',
+                    c.name,
+                    '","flaggedVerdict":',
+                    vm.toString(uint256(flagged)),
+                    ',"otherVerdict":',
+                    vm.toString(uint256(other)),
+                    ',"allowed":',
+                    vm.toString(allowed),
+                    ',"id":"7","flaggedId":"8","now":"1800000000","floor":"1799913600","feedDisabled":false,"feedEnabledAt":"0","report":',
+                    _evReport(c),
+                    ',"record":',
+                    _evRecord(c),
+                    "}"
+                )
+            );
+        }
+    }
+
+    /// R4-01: export raw miner inputs alongside production reader outputs.
+    function _bonusVectors() internal {
+        VecMiner miner = new VecMiner();
+        uint32[6] memory mults = [uint32(1), 6, 0, 6, 6, 6];
+        uint64[6] memory bases = [uint64(24), 4, 4, 0, 79, 4];
+        uint128[6] memory weights = [uint128(48), 456, 456, 456, 0, 12];
+        for (uint256 i; i < mults.length; ++i) {
+            miner.set(mults[i], bases[i], weights[i]);
+            RigReport memory r = BscRigReader.read(IRigVaultBsc(address(miner)), IPodMining(address(miner)), 7);
+            _emit(
+                string.concat(
+                    '{"k":"bonus","mult":"',
+                    vm.toString(mults[i]),
+                    '","bstar":"',
+                    vm.toString(bases[i]),
+                    '","rawBonus":"3752","verifWeight":"',
+                    vm.toString(weights[i]),
+                    '","bonus":"',
+                    vm.toString(r.bonus),
+                    '","base":"',
+                    vm.toString(r.verifWeight - r.bonus),
+                    '"}'
+                )
+            );
+        }
+    }
+
     function _emit(string memory line) internal {
         ++n;
         console.log(string.concat("VEC ", line));
@@ -866,5 +1051,41 @@ contract ParityVectors is Script {
     function _rnd(uint256 mod) internal returns (uint256) {
         seed = uint256(keccak256(abi.encode(seed, n)));
         return mod == 0 ? 0 : seed % mod;
+    }
+}
+
+/// Raw miner answers only; report normalization uses the production reader.
+contract VecMiner {
+    Miner internal m;
+
+    function set(uint32 mult, uint64 base, uint128 weight) external {
+        m.mult = mult;
+        m.bstar = base;
+        m.verifWeight = weight;
+        m.bonus = 3752;
+    }
+
+    function rigs(uint256) external pure returns (address, uint256) {
+        return (address(0xC1C), 1007);
+    }
+
+    function cellOf(bytes32) external pure returns (address) {
+        return address(0);
+    }
+
+    function minerKey(address, uint256) external pure returns (bytes32) {
+        return bytes32(0);
+    }
+
+    function getMiner(bytes32) external view returns (Miner memory) {
+        return m;
+    }
+
+    function totalVerifWeight() external pure returns (uint256) {
+        return 1_579_201;
+    }
+
+    function pending(bytes32) external pure returns (uint256) {
+        return 0;
     }
 }

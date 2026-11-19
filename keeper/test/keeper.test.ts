@@ -203,7 +203,7 @@ describe("harvest and evidence bookkeeping (part D, audit L14)", () => {
       contracts.map((c) => {
         const answers: Record<string, unknown> = {
           rigs: [CELL, c.args?.[0]],
-          getMiner: { taskId: 4, status, stopBlock: 0n, since: 0n, verifWeight, bonus: 0n },
+          getMiner: { taskId: 4, status, stopBlock: 0n, since: 0n, verifWeight, bstar: verifWeight, mult: 1, bonus: 0n },
           pending,
           cellOf: CELL,
           ownerOf: CELL,
@@ -311,7 +311,7 @@ describe("covered harvest in the harvest job (part E §3.1)", () => {
       return contracts.map((c) => {
         const answers: Record<string, unknown> = {
           rigs: [CELL, c.args?.[0]],
-          getMiner: { taskId: 4, status: 1, stopBlock: 0n, since: 0n, verifWeight: 500n, bonus: 0n },
+          getMiner: { taskId: 4, status: 1, stopBlock: 0n, since: 0n, verifWeight: 500n, bstar: 500n, mult: 1, bonus: 0n },
           pending: pending(),
           cellOf: CELL,
           ownerOf: CELL,

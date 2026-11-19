@@ -1,9 +1,9 @@
 // The keeper's cycle (SPEC-PHASE3-KEEPER §4): upgrade watch first, then admin watch, harvest,
 // impairment, sweep and balances. Each job is isolated: a failing job logs, alerts and lets the others
 // run. Every transaction goes through `Sender`, which simulates first and never sends in dry mode.
-import { formatEther, getAddress, type Address } from "viem";
+import { formatEther, getAddress, zeroHash, type Address, type Hex } from "viem";
 import { ADDR, EXPECTED_IMPL, type Deployment } from "./addresses.js";
-import { agentAbi, erc20Abi, factoryAbi, oftFeeAbi, poolAbi, reporterAbi, screenAbi, vaultAbi } from "./abi.js";
+import { agentAbi, endpointAbi, erc20Abi, factoryAbi, oftFeeAbi, poolAbi, reporterAbi, screenAbi, vaultAbi } from "./abi.js";
 import type { Alerts } from "./alerts.js";
 import type { Clients } from "./chains.js";
 import type { Config } from "./config.js";
@@ -14,6 +14,7 @@ import { LANDED_SLACK, nextActions, phaseOf, pushIfDue, pushUnlanded, type Actio
 import {
   COVER_CHECK_EVERY,
   EVIDENCE_MAX_SENDS,
+  EVIDENCE_UNLANDED,
   FEE_BPS_FALLBACK,
   PRE_MATURITY,
   SHORTFALL_ALERT_AT,
@@ -36,8 +37,9 @@ import {
 import { stepWatch, type BrakeKind, type Target } from "./logic/upgradeWatch.js";
 import { BEM_FLOAT, dailySpend } from "./logic/budget.js";
 import { syncDue } from "./logic/income.js";
-import { clearPlan, enableFloor, pushOpen, type FeedView, type Report } from "./logic/evidence.js";
+import { ENABLE_PUSH_MARGIN, clearPlan, clearPushState, enableFloor, evidenceKind, pushOpen, type FeedView, type Report } from "./logic/evidence.js";
 import { PUSH_COOLDOWN } from "./logic/pushLimits.js";
+import { DUPLICATE_CHUNK, DUPLICATE_STALL, circuitEntry, rememberCircuit, uint256 } from "./logic/duplicateWatch.js";
 import { isolatedPush } from "./pushIsolation.js";
 import { PublicData } from "./publicData.js";
 import {
@@ -73,7 +75,7 @@ const FLOAT_APPROVAL = 100n * BOND;
 const APPROVE_FLOAT = "approve BEM bond float to the vault";
 /** Alert when an operating fee covers less than this share of a loan's BSC cost, in percent (§5.3). */
 const COVERAGE_ALERT_PCT = 110n;
-/** A row B block whose BSC read stays unconfirmed this many cycles alerts the owner (final audit L-5). */
+/** A row B block or unknown recovery waiting this many unconfirmed BSC cycles alerts the owner. */
 const ROW_B_UNCONFIRMED_CYCLES = 3;
 /** Reverts the impairment machine expects and simply waits out (§4.4). */
 /** An evidence harvest due this cycle (part D §5.2). */
@@ -156,16 +158,36 @@ export class Keeper {
     // A crash after broadcast but before the cycle save must not buy a second refresh.
     for (const pending of state.pendingTx.bsc) {
       // nor a second post-enable push inside the cooldown (RB3-03), nor a second row B push for the incident (RB3-04)
-      const pushed = /^(?:enable-push|clear-push) \[([\d,]+)\]/.exec(pending.label);
-      if (pushed) for (const id of pushed[1]!.split(",")) state.lastPushAt[id] = Math.max(state.lastPushAt[id] ?? 0, pending.sentAt);
-      const cleared = /^clear-push \[([\d,]+)\] for (.+)$/.exec(pending.label);
-      if (cleared) for (const id of cleared[1]!.split(",")) (state.refresh[`${cleared[2]}:${id}`] ??= {}).pushAt ??= pending.sentAt;
+      const at = pending.createdAt ?? pending.sentAt;
+      const pushed = pending.address.toLowerCase() === d?.reporter.toLowerCase()
+        ? /^(?:push|enable-push|clear-push|unknown-push) \[([\d,]+)\]/.exec(pending.label) : null;
+      if (pushed) for (const id of pushed[1]!.split(",")) {
+        state.lastPushAt[id] = Math.max(state.lastPushAt[id] ?? 0, at);
+        if (pending.label.startsWith("push ") && (state.impairmentPushes[id]?.at ?? -1) <= at) {
+          state.impairmentPushes[id] = { at, status: "sent" };
+        }
+      }
+      const cleared = /^(?:clear-push|unknown-push) \[([\d,]+)\] for (.+)$/.exec(pending.label);
+      if (pushed && cleared) for (const id of cleared[1]!.split(",")) {
+        const rec = state.refresh[`${cleared[2]}:${id}`] ??= {};
+        if (rec.pushAt === undefined) {
+          rec.pushAt = at;
+          if (state.pushProvenance[id]?.at === at) rec.storedBefore = state.pushProvenance[id]!.storedBefore;
+        }
+        if (pending.label.startsWith("unknown-push")) rec.unknown = true;
+      }
       const match = /^refresh-harvest \[([\d,]+)\] for (.+)$/.exec(pending.label);
       if (!match) continue;
       for (const id of match[1]!.split(",")) {
         const rec = state.refresh[`${match[2]}:${id}`] ??= {};
         rec.sentAt ??= pending.sentAt;
       }
+    }
+    for (const pending of state.pendingTx.xlayer) {
+      const match = /^duplicate-suspend (\d+) for (\d+:\d+)$/.exec(pending.label);
+      if (!match || pending.address.toLowerCase() !== d?.screen.toLowerCase()) continue;
+      const pair = state.duplicateWatch.pairs[match[2]!];
+      if (pair && pair.ids.includes(match[1]!) && !pair.sent.includes(match[1]!)) pair.sent.push(match[1]!);
     }
   }
 
@@ -224,6 +246,11 @@ export class Keeper {
       }
     });
     await this.job("upgradeWatch", () => this.upgradeWatch(bscBlock));
+    if (this.frozen) for (const rec of Object.values(this.state.refresh)) {
+      delete rec.suspectSince;
+      delete rec.clearWithheldSince;
+    }
+    await this.job("harvest-landings", () => this.checkHarvestLandings(now));
     if (this.d) {
       const d = this.d;
       await this.job("logs", () => this.scanLogs(d));
@@ -243,10 +270,89 @@ export class Keeper {
       }
     }
     await this.job("balances", () => this.balances(now));
+    if (this.d) await this.job("duplicate-circuits", () => this.duplicateCircuits(this.d!, bscBlock, now));
     this.lastCycleAt = now;
     // The app's read-only data comes last, after every guardian job, capped and time-boxed, and it never
     // throws, so it can neither delay nor stop the guardian work (SPEC-PHASE5-APP §8.2).
     if (this.publicData) await this.publicData.run();
+  }
+
+  /** RB4-07: one bounded chunk at the scan's pinned finalized block, after the existing keeper jobs. */
+  private async duplicateCircuits(d: Deployment, block: bigint | null, now: number): Promise<void> {
+    const watch = this.state.duplicateWatch;
+    watch.startedAt ??= now;
+    try {
+      if (block === null) return;
+      const b = this.c.bsc.public;
+      if (!watch.scan) {
+        if (watch.completedBlock !== undefined && block <= BigInt(watch.completedBlock)) return;
+        const count = await b.readContract({ address: ADDR.rigVault, abi: vaultAbi, functionName: "deposits", blockNumber: block });
+        if (!uint256(count)) throw new Error("duplicate scan: unreadable deposits counter");
+        watch.scan = { block: block.toString(), count: count.toString(), next: "1", seen: {} };
+      }
+      const scan = watch.scan, count = BigInt(scan.count);
+      const ids: bigint[] = [];
+      for (let id = BigInt(scan.next); id <= count && ids.length < DUPLICATE_CHUNK; id++) ids.push(id);
+      if (ids.length > 0) {
+        const results = await b.multicall({ allowFailure: true, blockNumber: BigInt(scan.block),
+          contracts: ids.map((id) => ({ address: ADDR.rigVault, abi: vaultAbi, functionName: "rigs", args: [id] }) as const),
+        });
+        const entries = results.map((r) => r.status === "success" ? circuitEntry(r.result) : null);
+        if (entries.length !== ids.length || entries.some((e) => e === null)) throw new Error("duplicate scan: unreadable rig entry; pinned chunk retained for retry");
+        ids.forEach((id, i) => rememberCircuit(scan, watch.pairs, id, entries[i]!));
+        scan.next = (ids[ids.length - 1]! + 1n).toString();
+      }
+      if (BigInt(scan.next) > count) {
+        watch.completedAt = now;
+        watch.completedBlock = scan.block;
+        watch.stalledAlerted = false;
+        delete watch.scan;
+      }
+    } finally {
+      if (now - (watch.completedAt ?? watch.startedAt) >= DUPLICATE_STALL && !watch.stalledAlerted) {
+        watch.stalledAlerted = true;
+        await this.alerts.send("duplicate:stalled", "owner review: no complete duplicate circuit scan within one hour", true);
+      }
+      // A failed chunk cannot hold back actions already proven by earlier validated chunks.
+      for (const [key, pair] of Object.entries(watch.pairs)) {
+        if (!pair.alerted) {
+          pair.alerted = true;
+          await this.alerts.send(`duplicate:${key}`, `owner review: vault ids [${pair.ids.join(",")}] share circuit (${pair.circuits}, ${pair.circuitId}) at finalized BSC block ${pair.block}; suspending both passes`, true);
+        }
+        for (const id of pair.ids) {
+          if (pair.sent.includes(id)) continue;
+          const result = await this.send(this.tx.xlayer, { label: `duplicate-suspend ${id} for ${key}`, address: d.screen, abi: screenAbi, functionName: "suspendPass", args: [BigInt(id)], urgency: "urgent" }, true);
+          if (result === "sent") pair.sent.push(id);
+        }
+      }
+    }
+  }
+
+  /** RB4-06: observe delivery only; a retry of LayerZero execution is an owner decision. */
+  private async checkHarvestLandings(now: number): Promise<void> {
+    const entries = Object.entries(this.state.harvestLandings);
+    if (entries.length === 0) return;
+    const results = await this.c.xlayer.public.multicall({
+      allowFailure: true,
+      contracts: entries.map(([guid]) => ({ address: ADDR.endpoint, abi: endpointAbi, functionName: "composeQueue", args: [ADDR.bemXLayer, ADDR.voucher, guid as Hex, 0] }) as const),
+    });
+    let unreadable = false;
+    for (const [i, [guid, entry]] of entries.entries()) {
+      const result = results[i];
+      const value = result?.status === "success" ? result.result : undefined;
+      if (typeof value !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(value)) {
+        unreadable = true;
+        continue;
+      }
+      if (BigInt(value) === 1n) {
+        delete this.state.harvestLandings[guid];
+      } else if (!entry.alerted && now - entry.sentAt >= EVIDENCE_UNLANDED) {
+        entry.alerted = true;
+        const status = value.toLowerCase() === zeroHash ? "not received" : `compose pending (${value})`;
+        await this.alerts.send(`harvest:unlanded:${guid}`, `owner review: harvest for rigs [${entry.rigs.join(",")}] with guid ${guid}, BSC transaction ${entry.transaction}, has not landed after ${now - entry.sentAt} s: ${status}`, true);
+      }
+    }
+    if (unreadable) throw new Error("harvest compose queue could not be read; landing entries retained");
   }
 
   // ───────────────────────── §4.1 upgrade watch
@@ -364,7 +470,9 @@ export class Keeper {
     pruneEvidence(this.state.evidence, openKeys, readAgents);
     const incidents = new Set(open.map((l) => `${loanKey(l.agent, l.start)}:${l.loan.impairedAt}`));
     for (const key of Object.keys(this.state.refresh)) {
-      if (readAgents.has(key.split(":")[0]!) && !incidents.has(key.slice(0, key.lastIndexOf(":")))) delete this.state.refresh[key];
+      // An unflagged epoch is checked against flagEvidenceFrom only after that getter succeeds.
+      const unflagged = open.some((l) => l.loan.impairedAt === 0 && key.startsWith(`${loanKey(l.agent, l.start)}:u`));
+      if (readAgents.has(key.split(":")[0]!) && !unflagged && !incidents.has(key.slice(0, key.lastIndexOf(":")))) delete this.state.refresh[key];
     }
     const seized = await readSeized(this.c, d);
     for (const k of this.coverCheckedAt.keys()) if (!openKeys.has(k)) this.coverCheckedAt.delete(k);
@@ -477,6 +585,13 @@ export class Keeper {
   // ───────────────────────── §4.4 impairment machine
 
   private async impairment(d: Deployment, loans: LoanSnapshot[], bscBlock: bigint, now: number): Promise<void> {
+    if (this.frozen) {
+      for (const rec of Object.values(this.state.refresh)) {
+        delete rec.suspectSince;
+        delete rec.clearWithheldSince;
+      }
+      return;
+    }
     const open = loans.filter((l) => l.loan.open);
     const ids = [...new Set(open.flatMap((l) => l.collateral))];
     if (ids.length === 0) return;
@@ -488,6 +603,10 @@ export class Keeper {
       this.feedState(d),
     ]);
     const feedDisabled = feed.disabled;
+    if (feedDisabled) for (const rec of Object.values(this.state.refresh)) {
+      delete rec.suspectSince;
+      delete rec.clearWithheldSince;
+    }
     const confirmed = new Map<bigint, RigCondition | null>();
     const syncsZero = new Map<bigint, boolean>();
     for (const r of rigs) {
@@ -504,10 +623,19 @@ export class Keeper {
       // one loan's failure must not stop the others (L11)
       await this.job(`impairment:${l.agent}`, async () => {
         const x = this.c.xlayer.public;
-        const [flagFrom, seizeFrom] = d.legacy ? [l.start + 1, l.loan.seizeStart] : (await Promise.all([
-          x.readContract({ address: l.agent, abi: agentAbi, functionName: "flagEvidenceFrom" }),
-          x.readContract({ address: l.agent, abi: agentAbi, functionName: "seizeEvidenceFrom" }),
-        ])).map(Number);
+        const [flagRead, seizeRead] = await Promise.allSettled([
+          d.legacy ? Promise.resolve(l.start + 1) : x.readContract({ address: l.agent, abi: agentAbi, functionName: "flagEvidenceFrom" }),
+          d.legacy ? Promise.resolve(l.loan.seizeStart) : x.readContract({ address: l.agent, abi: agentAbi, functionName: "seizeEvidenceFrom" }),
+        ]);
+        if (flagRead.status === "rejected") throw flagRead.reason;
+        const flagFrom = Number(flagRead.value);
+        const prefix = `${loanKey(l.agent, l.start)}:`;
+        const incident = `${prefix}${l.loan.impairedAt || `u${flagFrom}`}`;
+        for (const key of Object.keys(this.state.refresh)) {
+          if (key.startsWith(prefix) && key.slice(0, key.lastIndexOf(":")) !== incident) delete this.state.refresh[key];
+        }
+        if (seizeRead.status === "rejected") throw seizeRead.reason;
+        const seizeFrom = Number(seizeRead.value);
         const views: RigView[] = l.collateral.map((id) => ({
           id,
           confirmed: confirmed.get(id) ?? null,
@@ -518,10 +646,38 @@ export class Keeper {
           lastPushAt: this.state.lastPushAt[id.toString()] ?? 0,
           passSuspended: suspended.get(id) ?? false,
         }));
+        const phase = phaseOf(l.loan, now);
+        const floor = phase === "window" ? seizeFrom : flagFrom;
+        for (const v of views) {
+          const key = `${incident}:${v.id}`;
+          let rec = this.state.refresh[key];
+          const suspect = v.confirmed !== null && v.confirmed !== "healthy";
+          if (suspect) {
+            rec ??= this.state.refresh[key] = {};
+            rec.lastConfirmed = v.confirmed!;
+          } else if (v.confirmed === "healthy" && rec) delete rec.lastConfirmed;
+          const actsOn = (feedDisabled || v.report !== undefined)
+            && evidenceKind(v.id, phase === "window" ? seizeFrom! : flagFrom!, now, feed, v.report, records.get(v.id)) !== 0;
+          if (feedDisabled || v.confirmed === "healthy" || actsOn) {
+            if (rec) delete rec.suspectSince;
+          } else if (suspect && (phase === "none" || phase === "window" || phase === "expired")) {
+            rec ??= this.state.refresh[key] = {};
+            rec.suspectSince ??= now;
+          }
+          if (phase !== "live" && rec?.suspectSince !== undefined && !rec.impairmentAlerted
+            && now >= Math.max(rec.suspectSince, floor) + PUSH_COOLDOWN + EVIDENCE_UNLANDED) {
+            rec.impairmentAlerted = true;
+            const attempt = this.state.impairmentPushes[v.id.toString()];
+            await this.alerts.send(`impairment:${key}`, `owner review: rig ${v.id} remains suspect (${rec.lastConfirmed}); current BSC read ${v.confirmed === null ? "unconfirmed" : `confirmed ${v.confirmed}`}; no ${phase === "window" ? "seize" : "flag"} evidence; last impairment push ${attempt ? `${attempt.status} at ${attempt.at}${attempt.reason ? `: ${attempt.reason}` : ""}` : "not attempted"} on ${l.agent}`, true);
+          }
+        }
         for (const v of views) {
           if (!pushUnlanded(v, now)) continue;
+          const refresh = this.state.refresh[`${loanKey(l.agent, l.start)}:${l.loan.impairedAt}:${v.id}`];
+          const suspect = v.confirmed !== null && v.confirmed !== "healthy";
+          if ((feedDisabled && l.loan.expired) || (!suspect && refresh?.unknown)) continue;
           // a row B push (RB3-04) goes once per incident and is not retried (final audit L-6)
-          const once = this.state.refresh[`${loanKey(l.agent, l.start)}:${l.loan.impairedAt}:${v.id}`]?.pushAt === v.lastPushAt;
+          const once = !suspect && refresh?.pushAt === v.lastPushAt;
           await this.alerts.send(`feed:dead:${v.id}`, once
             ? `the report pushed for rig ${v.id} to clear the flag was not stored after 10 minutes: the feed may be dead (sent once for this flag, not retried)`
             : `the impairment report pushed for rig ${v.id} was not stored after 10 minutes: the feed may be dead (retrying hourly)`);
@@ -539,7 +695,8 @@ export class Keeper {
         let clearAllowed = false;
         const clearPushRigs: bigint[] = [];
         const rowBRigs: bigint[] = [];
-        if (l.loan.expired && !feedDisabled) {
+        const recoveryRigs: bigint[] = [];
+        if (l.loan.expired) {
           clearAllowed = true;
           const refresh: bigint[] = [];
           const once: bigint[] = [];
@@ -547,20 +704,37 @@ export class Keeper {
             const key = `${loanKey(l.agent, l.start)}:${l.loan.impairedAt}:${id}`;
             const rec = this.state.refresh[key] ??= {};
             const p = clearPlan(id, l.loan.impairedRig, seizeFrom!, now, reports.get(id), records.get(id), rec, { feed, confirmed: confirmed.get(id) ?? null, pushOpen: ready });
+            if (p.row === "U" || p.row === "N") rec.unknown = true;
+            if (rec.unknown) {
+              recoveryRigs.push(id);
+              // A push after this flag and enable supplies the same recovery, including a journal-restored push.
+              const pushedAt = this.state.lastPushAt[id.toString()];
+              if (!feedDisabled && !clearPushState(id, reports.get(id), rec, feed).spent && pushedAt !== undefined
+                && pushedAt > (rec.pushAt ?? -1) && pushedAt >= Math.max(l.loan.impairedAt, enableFloor(feed) + ENABLE_PUSH_MARGIN)) {
+                rec.pushAt = pushedAt;
+                const provenance = this.state.pushProvenance[id.toString()];
+                // The baseline survives receipt reconciliation; a legacy entry without it starts conservatively.
+                rec.storedBefore = provenance?.at === pushedAt ? provenance.storedBefore : Number(reports.get(id)?.observedAt ?? 0);
+              }
+            }
             if (p.blocks) clearAllowed = false;
             if (p.blocks && p.row === "B") rowBRigs.push(id);
             if (p.push) clearPushRigs.push(id);
-            if (p.pushOnce) once.push(id);
+            if (p.pushOnce && !(rec.unknown && clearPushState(id, reports.get(id), rec, feed).spent)) once.push(id);
             if (p.alert) {
-              rec.alerted = true;
-              const why = p.row === "B" && rec.pushAt !== undefined
+              if (feedDisabled) rec.brakeAlerted = true;
+              else if (rec.unknown && rec.sentAt !== undefined) rec.recoveryAlerted = true;
+              else rec.alerted = true;
+              const why = rec.unknown && !feedDisabled && rec.sentAt !== undefined
+                ? `still blocks the clear after its recovery push and harvest; no further recovery is sent`
+                : p.row === "B" && rec.pushAt !== undefined
                 ? `still blocks the clear after its fresh push (stored impaired report)`
                 : `blocks or has an unreadable clear source (${p.verdict})`;
               await this.alerts.send(`clear:${key}`, `owner review: rig ${id} ${why} on ${l.agent}; observedAt ${reports.get(id)?.observedAt ?? "unknown"}`, true);
             }
-            // row B waits while the BSC read is unconfirmed; one that stays unconfirmed is alerted like an unreadable
+            // Row B and unknown recovery wait on unconfirmed BSC reads; a prolonged wait alerts like an unreadable
             // refresh source, once per incident (final audit L-5)
-            if (p.blocks && p.row === "B" && (confirmed.get(id) ?? null) === null) rec.unconfirmed = (rec.unconfirmed ?? 0) + 1;
+            if (!feedDisabled && p.blocks && (rec.unknown ? rec.sentAt === undefined : p.row === "B") && (confirmed.get(id) ?? null) === null) rec.unconfirmed = (rec.unconfirmed ?? 0) + 1;
             else delete rec.unconfirmed;
             if ((rec.unconfirmed ?? 0) >= ROW_B_UNCONFIRMED_CYCLES && !rec.alerted) {
               rec.alerted = true;
@@ -576,12 +750,30 @@ export class Keeper {
               }
             }
           }
-          if (refresh.length > 0) await this.refreshHarvest(d, l, refresh, bscBlock, now);
-          if (once.length > 0) await this.clearPush(d, l, once, reports, now);
+          if (refresh.length > 0) await this.refreshHarvest(d, l, refresh, bscBlock, now, refresh.some((id) => recoveryRigs.includes(id)));
+          const unknown = once.filter((id) => recoveryRigs.includes(id));
+          const impaired = once.filter((id) => !recoveryRigs.includes(id));
+          if (impaired.length > 0) await this.clearPush(d, l, impaired, reports, now);
+          if (unknown.length > 0) await this.clearPush(d, l, unknown, reports, now, true);
         }
-        const actions = nextActions({ now, loan: l.loan, rigs: views, feedDisabled, feedEnabledAt: feed.enabledAt, pushOpen: ready, suspendOnRevoke: this.cfg.suspendOnRevoke, flagEvidenceFrom: flagFrom, seizeEvidenceFrom: seizeFrom, clearAllowed, clearPushRigs, rowBRigs });
+        const actions = nextActions({ now, loan: l.loan, rigs: views, feedDisabled, feedEnabledAt: feed.enabledAt, pushOpen: ready, suspendOnRevoke: this.cfg.suspendOnRevoke, flagEvidenceFrom: flagFrom, seizeEvidenceFrom: seizeFrom, clearAllowed, clearAlertsManaged: true, clearPushRigs, rowBRigs, recoveryRigs });
+        // Retained conditions veto only an otherwise selected clear; they are never current confirmation.
+        const clearWithheld = !feedDisabled && actions.some((a) => a.kind === "clear")
+          && views.some((v) => this.state.refresh[`${incident}:${v.id}`]?.lastConfirmed !== undefined);
+        for (const v of views) {
+          const key = `${incident}:${v.id}`, rec = this.state.refresh[key];
+          if (!rec) continue;
+          if (clearWithheld && rec.lastConfirmed !== undefined) {
+            rec.clearWithheldSince ??= now;
+            if (!rec.impairmentAlerted && now >= Math.max(rec.clearWithheldSince, flagFrom) + PUSH_COOLDOWN + EVIDENCE_UNLANDED) {
+              rec.impairmentAlerted = true;
+              await this.alerts.send(`impairment:${key}`, `owner review: rig ${v.id} has kept condition ${rec.lastConfirmed}; current BSC read ${v.confirmed === null ? "unconfirmed" : `confirmed ${v.confirmed}`}; an allowed clear is withheld on ${l.agent}`, true);
+            }
+          } else delete rec.clearWithheldSince;
+        }
         for (const a of actions) {
-          await this.act(d, l.agent, a, now);
+          if (a.kind === "clear" && clearWithheld) continue;
+          await this.act(d, l.agent, a, now, reports);
           if (a.kind === "flag") {
             // RA-08 may pay and close instead of flagging. Stop using this snapshot.
             const [fresh] = await readLoans(this.c, [l.agent]);
@@ -590,7 +782,6 @@ export class Keeper {
           }
         }
         // path (b) needs a harvest-synced power of 0 while the feed is disabled (part D §5.2)
-        const phase = phaseOf(l.loan, now);
         for (const v of views) {
           const ek = evidenceKey(loanKey(l.agent, l.start), v.id);
           const rec = currentIncident(this.state.evidence[ek], l.loan.impairedAt);
@@ -683,7 +874,10 @@ export class Keeper {
     // an unreadable report keeps the rig in the round
     round.rigs = round.rigs.filter((id) => still.has(id) && storedAt(BigInt(id)) < floor);
     if (round.rigs.length === 0 || feed.disabled || !ready) return;
-    const due = round.rigs.map(BigInt).filter((id) => pushIfDue({ id, lastPushAt: this.state.lastPushAt[id.toString()] ?? 0, storedObservedAt: storedAt(id) }, now).length > 0);
+    const due = round.rigs.map(BigInt).filter((id) => !open.some((l) => {
+      const rec = this.state.refresh[`${loanKey(l.agent, l.start)}:${l.loan.impairedAt}:${id}`];
+      return l.collateral.includes(id) && rec?.unknown && clearPushState(id, reports.get(id), rec, feed).spent;
+    }) && pushIfDue({ id, lastPushAt: this.state.lastPushAt[id.toString()] ?? 0, storedObservedAt: storedAt(id) }, now).length > 0);
     if (due.length === 0) return;
     let balance = await this.c.bsc.public.getBalance({ address: this.c.account.address });
     let held = false;
@@ -695,42 +889,64 @@ export class Keeper {
             held = true;
             return { status: "waiting", reason: "keeper reserve" };
           }
-          const r = await this.sendResult(this.tx.bsc, { label: `enable-push [${ids.join(",")}]`, address: d.reporter, abi: reporterAbi, functionName: "push", args: [ids], value: fee, urgency: "urgent" }, true);
+          const r = await this.sendPush(d, `enable-push [${ids.join(",")}]`, ids, fee, "urgent", reports, now, false, true);
           if (r.status === "sent") balance -= fee;
           return r;
         },
         (id) => this.custodyAlert(id, now));
       for (const { ids, result } of results) if (result.status === "sent") {
         this.state.daily.pushes++;
-        for (const id of ids) this.state.lastPushAt[id.toString()] = now;
+        for (const id of ids) this.state.lastPushAt[id.toString()] = this.state.pushProvenance[id.toString()]!.at;
       }
     }
     if (held) await this.alerts.send("push:reserve:enable", "post-enable pushes held: the keeper BNB is down to the harvest reserve");
   }
 
   /**
-   * RB3-04: one fresh push per incident for each rig whose clear a stored impaired report blocks (row B) while the
-   * keeper's own BSC read shows it healthy, so a row H report overtakes the block; no refresh harvest. A rig with a
+   * RB3-04/RB4-05: one fresh push per incident for a blocking impaired or unknown reading while the keeper's BSC
+   * read shows it healthy. Row B gets no refresh harvest; unknown can then get one bounded harvest. A rig with a
    * push sent inside the cooldown waits for that one, and its incident push stays unspent.
    */
-  private async clearPush(d: Deployment, loan: LoanSnapshot, wanted: bigint[], reports: Map<bigint, Report | null>, now: number): Promise<void> {
+  private async clearPush(d: Deployment, loan: LoanSnapshot, wanted: bigint[], reports: Map<bigint, Report | null>, now: number, unknown = false): Promise<void> {
     const incident = `${loanKey(loan.agent, loan.start)}:${loan.loan.impairedAt}`;
     const ids = wanted.filter((id) => now - (this.state.lastPushAt[id.toString()] ?? 0) >= PUSH_COOLDOWN);
     if (ids.length === 0) return;
     const results = await isolatedPush(ids,
       async (part) => (await this.c.bsc.public.readContract({ address: d.reporter, abi: reporterAbi, functionName: "quote", args: [part] })) * 11n / 10n,
-      (part, fee) => this.sendResult(this.tx.bsc, { label: `clear-push [${part.join(",")}] for ${incident}`, address: d.reporter, abi: reporterAbi, functionName: "push", args: [part], value: fee, urgency: "routine" }),
+      (part, fee) => this.sendPush(d, `${unknown ? "unknown-push" : "clear-push"} [${part.join(",")}] for ${incident}`, part, fee, "routine", reports, now),
       (id) => this.custodyAlert(id, now));
     for (const { ids: part, result } of results) if (result.status === "sent") {
       this.state.daily.pushes++;
       for (const id of part) {
-        this.state.lastPushAt[id.toString()] = now;
+        const provenance = this.state.pushProvenance[id.toString()]!;
+        this.state.lastPushAt[id.toString()] = provenance.at;
         const key = `${incident}:${id}`;
         // the report stored now, so the push's own report can be told from it (final audit L-4)
-        const r = reports.get(id);
-        this.state.refresh[key] = { ...this.state.refresh[key], pushAt: now, storedBefore: r && r.rigId === id ? Number(r.observedAt) : 0 };
+        this.state.refresh[key] = { ...this.state.refresh[key], pushAt: provenance.at, storedBefore: provenance.storedBefore };
       }
     }
+  }
+
+  /** Keep the report baseline in the same pre-broadcast checkpoint as the pending push. */
+  private async sendPush(d: Deployment, label: string, ids: bigint[], fee: bigint, urgency: Call["urgency"], reports: Map<bigint, Report | null>, now: number, impairment = false, alertOnFailure = false): Promise<SendResult> {
+    let attemptedAt = now;
+    const storedBefore = new Map(ids.map((id) => {
+      const r = reports.get(id);
+      return [id, r && r.rigId === id ? Number(r.observedAt) : 0] as const;
+    }));
+    const beforeBroadcast = (at: number) => {
+      attemptedAt = at;
+      for (const id of ids) {
+        this.state.pushProvenance[id.toString()] = { at, storedBefore: storedBefore.get(id)! };
+        if (impairment) this.state.impairmentPushes[id.toString()] = { at, status: "sent" };
+      }
+    };
+    const result = await this.sendResult(this.tx.bsc, { label, address: d.reporter, abi: reporterAbi, functionName: "push", args: [ids], value: fee, urgency, beforeBroadcast }, alertOnFailure);
+    if (result.status === "sent") beforeBroadcast(attemptedAt);
+    if (impairment) for (const id of ids) this.state.impairmentPushes[id.toString()] = {
+      at: attemptedAt, status: result.status, ...("reason" in result ? { reason: result.reason } : {}),
+    };
+    return result;
   }
 
   /** CustodyUnreadable: the rig is left out of pushes, alerted once per rig per UTC day. */
@@ -742,14 +958,18 @@ export class Keeper {
   }
 
   /** Refresh health once for each blocking rig of this flag, including non-flagged collateral. */
-  private async refreshHarvest(d: Deployment, loan: LoanSnapshot, wanted: bigint[], block: bigint, now: number): Promise<void> {
+  private async refreshHarvest(d: Deployment, loan: LoanSnapshot, wanted: bigint[], block: bigint, now: number, bounded = false): Promise<void> {
     const all = await readBscRigs(this.c, loan.collateral, block);
     const readable = all.filter((r) => r.ok && r.vaultKnows);
     const targets = readable.filter((r) => wanted.includes(r.id));
     if (targets.length === 0) return;
     const { ids, needsBond } = bundleEvidence(targets, readable, BOND, DUST, MAX_BATCH);
-    if (needsBond && !(await this.bondReady())) return;
     const fee = await this.c.bsc.public.readContract({ address: ADDR.rigVault, abi: vaultAbi, functionName: "quoteHarvest", args: [BigInt(ids.length)] });
+    if (bounded && (await this.c.bsc.public.getBalance({ address: this.c.account.address })) - fee * 11n / 10n < this.cfg.bnbReserve) {
+      await this.alerts.send(`refresh:reserve:${loanKey(loan.agent, loan.start)}:${loan.loan.impairedAt}`, "unknown recovery harvest held: the keeper BNB is down to the harvest reserve");
+      return;
+    }
+    if (needsBond && !(await this.bondReady())) return;
     const result = await this.send(this.tx.bsc, { label: `refresh-harvest [${ids.join(",")}] for ${loanKey(loan.agent, loan.start)}:${loan.loan.impairedAt}`, address: ADDR.rigVault, abi: vaultAbi, functionName: "harvest", args: [ids], value: fee * 11n / 10n, urgency: "routine" });
     if (result !== "sent") return;
     this.state.daily.harvests++;
@@ -831,7 +1051,7 @@ export class Keeper {
     return true;
   }
 
-  private async act(d: Deployment, agent: Address, a: Action, now: number): Promise<void> {
+  private async act(d: Deployment, agent: Address, a: Action, now: number, reports: Map<bigint, Report | null> = new Map()): Promise<void> {
     switch (a.kind) {
       case "alert":
         await this.alerts.send(`impair:${a.text}`, a.text);
@@ -843,11 +1063,11 @@ export class Keeper {
         // impairment pushes ignore the request limits and the reserve (§5.3 rule 7); fee + 10% (L1)
         const results = await isolatedPush(a.rigs,
           async (ids) => (await this.c.bsc.public.readContract({ address: d.reporter, abi: reporterAbi, functionName: "quote", args: [ids] })) * 11n / 10n,
-          (ids, fee) => this.sendResult(this.tx.bsc, { label: `push [${ids.join(",")}]`, address: d.reporter, abi: reporterAbi, functionName: "push", args: [ids], value: fee, urgency: "urgent" }),
+          (ids, fee) => this.sendPush(d, `push [${ids.join(",")}]`, ids, fee, "urgent", reports, now, true),
           (id) => this.custodyAlert(id, now));
         for (const { ids, result } of results) if (result.status === "sent") {
           this.state.daily.pushes++;
-          for (const id of ids) this.state.lastPushAt[id.toString()] = now;
+          for (const id of ids) this.state.lastPushAt[id.toString()] = this.state.pushProvenance[id.toString()]!.at;
         }
         return;
       }

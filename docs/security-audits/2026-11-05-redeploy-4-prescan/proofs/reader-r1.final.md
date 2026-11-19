@@ -1,0 +1,1 @@
+**FAIL — 7 correction items.** Written to [out/READER-1.md](READER-1.md), including the test rerun results.

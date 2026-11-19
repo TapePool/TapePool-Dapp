@@ -8,6 +8,9 @@ export const explorerAddress = (a: string): string => `${EXPLORER}/address/${a}`
 /** Where a miner harvests by hand, and the one confirmed TapePool handle. */
 export const TAPEOUT_URL = 'https://tapeout.net';
 export const TWITTER_URL = 'https://x.com/Tape_Pool';
+/** The landing page and the documentation site, linked from the footer. */
+export const LANDING_URL = 'https://tapepool.io';
+export const DOCS_URL = 'https://docs.tapepool.io';
 
 /* ───────── address book (SPEC-PHASE5-APP §3) ───────── */
 
@@ -72,26 +75,25 @@ export const MAINNET: AddressBook = {
 
 /* ───────── configuration ───────── */
 
-// The redeployed stack (redeploy 3, 2026-11-02, docs/redeploy-3/deploy-log.md); select with VITE_NETWORK=redeploy.
+// The redeployed stack (redeploy 4, 2026-11-16, docs/redeploy-4/deploy-log.md); select with VITE_NETWORK=redeploy.
 // MAINNET stays the default until the coordinator completes the cutover checks.
-// Redeploy 3 (docs/SPEC-REDEPLOY-3.md RC3-01, RD3-10): after RD3-04 the deploy runbook replaced `pool`, `factory`,
-// `policy`, `screen`, `lens`, `factoryDeployBlock` and `poolDeployBlock` with the new stack. `receiver`, `reporter`
-// and `reporterDeployBlock` stay: the feed is reused. test/config.test.ts checks this book against the latest
-// DeployPool broadcast. The redeploy 3 reads (`feedEnabledAt`, `FEED_SETTLE`) only drive the settling note, so a
-// failed read hides it and nothing else.
+// Redeploy 4 (docs/SPEC-REDEPLOY-4.md RC4-01, RD4-12): after RD4-06 the deploy runbook replaced the whole stack and
+// the feed: `pool`, `factory`, `policy`, `screen`, `lens`, `receiver`, `reporter` and the three deployment blocks.
+// test/config.test.ts checks this book against CLAUDE.md and the latest DeployPool broadcast. The settling reads
+// (`feedEnabledAt`, `FEED_SETTLE`) only drive the settling note, so a failed read hides it and nothing else.
 export const REDEPLOY: AddressBook | null = {
   network: 'redeploy',
   redeploy: true,
   chainId: 196,
   bscChainId: 56,
-  pool: '0x68c1D5e6f193cE5a5060BF7540Ae391cbC1939ca',
-  factory: '0xCB63a96929A28b2F826cD9d5eA67b6f4D200C3B8',
-  policy: '0x8983589e7575738c54339e6BDaddb63375EbFF23',
-  screen: '0x3ed768Ba7A72Ce8E9091097ED93616C2560f3ddf',
-  receiver: '0xB96847a3af4C9eC658cDC77dB98801AF399cFA1d',
+  pool: '0x1a9A9850D597D8e3a03AFae48E3ac8E2D4aeC9d7',
+  factory: '0xA9014E27dD17ea30E4Fa4f71934645b9DCEF8ac8',
+  policy: '0xBBFe498158b6A234f4f63B17673f6e8226656D34',
+  screen: '0xc2bBc2f2EC90e16f8a9619D26A51144Eb0AC1744',
+  receiver: '0xc94C9Cc912203c29C2c1b3534e0852BF4aFAeA10',
   voucher: '0x9cfc959cd42B2e1d39a0d850c528210E818AE520',
   bem: '0x60e62Efa9405d6873C5deaBD4E6CC91c25363952',
-  reporter: '0x24b5a7CA358Af29C51d16F801BbEcF746247AF0e',
+  reporter: '0xD54673E73448584E86C61f45203ab507F3F2c3eC',
   bscVault: '0x48D43345656f0f9510dC3c06CBa99dFf597617C2',
   podMining: '0x7E2E0DC66a3bD9103E69b766afA62d9f7b697b46',
   bemBsc: '0x5ce033B2bFCa3Af30b3e8C8457DeaF776A8b695a',
@@ -99,10 +101,10 @@ export const REDEPLOY: AddressBook | null = {
   implVault: '0xeB3F0614e37d995a96fA41908de8D47A57F56463',
   implVoucher: '0x66FB7d52C4931B48776D9019f88F7f58fB0d85E1',
   multicall3: '0xcA11bde05977b3631167028862bE2a173976CA11',
-  lens: '0xa66148be3353D85a5b4B028862C5EE9987dd0D84',
-  factoryDeployBlock: 74_859_490n,
-  reporterDeployBlock: 130_864_778n,
-  poolDeployBlock: 74_859_491n,
+  lens: '0xFcc669BC9cCa397CB01804035D5Be981d7389ef2',
+  factoryDeployBlock: 76_074_244n,
+  reporterDeployBlock: 133_949_050n,
+  poolDeployBlock: 76_074_246n,
 };
 
 export interface AppConfig {

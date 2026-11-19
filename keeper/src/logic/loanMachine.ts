@@ -1,8 +1,8 @@
 // Per-loan impairment machine (SPEC-PHASE3-KEEPER §4.4). Pure: given what the keeper read this cycle,
 // it returns the next actions. Every action is simulated before it is sent, so a step that the
 // contract would reject (for example `NoEvidence`) never costs gas and simply waits for a new cycle.
-// Whether a flag, a seize or a clear has evidence comes only from the R3-00 mirror in ./evidence.ts
-// (SPEC-REDEPLOY-3 RB3-02); the keeper's two-cycle confirmed BSC read is an extra gate on top of it.
+// Whether a flag, a seize or a clear has evidence comes only from the R3-00/R4-00 mirror in ./evidence.ts
+// (SPEC-REDEPLOY-4 RB4-01); the keeper's two-cycle confirmed BSC read is an extra gate on top of it.
 import type { RigCondition } from "./confirm.js";
 import { LANDED_SLACK, MAX_REPORT_AGE, clearReading, evidenceKind, type FeedView, type Report } from "./evidence.js";
 import { PUSH_COOLDOWN } from "./pushLimits.js";
@@ -48,9 +48,13 @@ export interface MachineInput {
   flagEvidenceFrom?: number;
   seizeEvidenceFrom?: number;
   clearAllowed?: boolean;
+  /** The keeper persists clear alerts per incident; standalone callers still receive a blocked-brake alert. */
+  clearAlertsManaged?: boolean;
   clearPushRigs?: bigint[];
   /** Rigs whose clear is blocked by a stored impaired report (row B): their pushes follow RB3-04, not the cooldown loop. */
   rowBRigs?: bigint[];
+  /** Rigs whose health recovery is managed by the keeper (RB4-05); impairment pushes keep their cooldown. */
+  recoveryRigs?: bigint[];
   now: number;
   loan: LoanState;
   rigs: RigView[];
@@ -90,19 +94,23 @@ export function pushIfDue(r: Pick<RigView, "id" | "lastPushAt" | "storedObserved
 
 export function nextActions(m: MachineInput): Action[] {
   const phase = phaseOf(m.loan, m.now);
-  const suspect = m.rigs.find((r) => bad(r.confirmed));
+  const suspects = m.rigs.filter((r) => bad(r.confirmed));
   const actions: Action[] = [];
   const flagFrom = m.flagEvidenceFrom ?? 0;
   const seizeFrom = m.seizeEvidenceFrom ?? m.loan.seizeStart;
   const feed: FeedView = { disabled: m.feedDisabled, enabledAt: m.feedEnabledAt ?? 0 };
-  // R3-00 rows E and VE (with the row S shield). A failed report read is never planned on, except while the
-  // feed is disabled, when no report row applies.
+  // R3-00 rows E and VE (with the row S shield). A failed report read is never planned on, except for flag/seize
+  // while the feed is disabled, when rows E and S do not apply.
   const readable = (r: RigView) => m.feedDisabled || r.report !== undefined;
   const evidence = (r: RigView, floor: number) =>
     readable(r) && evidenceKind(r.id, floor, m.now, feed, r.report, recordOf(r)) !== 0;
-  // rows H, B, U and VC; a push before the RB3-03 time would land below the enable floor and count for nothing
+  // rows H, B, U, N and VC; a push before the RB3-03 time would land below the enable floor and count for nothing
   const reading = (r: RigView) => clearReading(r.id, seizeFrom, m.now, feed, r.report, recordOf(r)).verdict;
   const push = (r: RigView): Action[] => (m.pushOpen ?? true ? pushIfDue(r, m.now) : []);
+  const pushSuspects = (): Action[] => {
+    const rigs = suspects.filter((r) => push(r).length > 0).map((r) => r.id);
+    return rigs.length > 0 ? [{ kind: "push", rigs }] : [];
+  };
 
   switch (phase) {
     case "closed":
@@ -110,52 +118,58 @@ export function nextActions(m: MachineInput): Action[] {
       return [];
 
     case "none": {
-      if (!suspect) return [];
-      const c = suspect.confirmed;
-      if (!suspect.passSuspended && (c === "rescue" || (c === "revoked" && m.suspendOnRevoke))) {
-        actions.push({ kind: "suspend", rig: suspect.id });
+      for (const suspect of suspects) {
+        const c = suspect.confirmed;
+        if (!suspect.passSuspended && (c === "rescue" || (c === "revoked" && m.suspendOnRevoke))) {
+          actions.push({ kind: "suspend", rig: suspect.id });
+        }
       }
       if (m.feedDisabled) {
         // path (a) is closed; a stopped or revoked rig syncs power 0 through the daily harvest, so
         // path (b) can still flag it. A rescued rig never syncs: tell the owner.
-        if (c === "rescue") {
+        for (const suspect of suspects.filter((r) => r.confirmed === "rescue")) {
           actions.push({ kind: "alert", text: `rescue of rig ${suspect.id} seen, flag impossible until enableFeed` });
-        } else if (evidence(suspect, flagFrom)) {
-          actions.push({ kind: "flag", rig: suspect.id });
         }
+        const found = suspects.find((r) => r.confirmed !== "rescue" && evidence(r, flagFrom));
+        if (found) actions.push({ kind: "flag", rig: found.id });
         return actions;
       }
-      if (evidence(suspect, flagFrom)) actions.push({ kind: "flag", rig: suspect.id });
-      else actions.push(...push(suspect));
+      const found = suspects.find((r) => evidence(r, flagFrom));
+      if (found) actions.push({ kind: "flag", rig: found.id });
+      else actions.push(...pushSuspects());
       return actions;
     }
 
     case "window": {
-      if (!suspect) return []; // healthy: let the flag expire
-      if (m.rigs.some((r) => bad(r.confirmed) && evidence(r, seizeFrom))) return [{ kind: "seize" }];
+      if (suspects.some((r) => evidence(r, seizeFrom))) return [{ kind: "seize" }];
       if (m.feedDisabled) return [];
-      return push(suspect);
+      return pushSuspects();
     }
 
     case "expired": {
-      if (m.feedDisabled) return [{ kind: "alert", text: "expired impairment flag while the feed is disabled: owner review required" }];
-      if (m.clearAllowed) return [{ kind: "clear" }];
-      if (suspect) {
-        if (evidence(suspect, flagFrom)) return [{ kind: "flag", rig: suspect.id }];
-        return push(suspect);
+      const flagged = m.rigs.find((r) => r.id === m.loan.impairedRig);
+      // R4-00/R4-08: unknown blocks on every rig, even without a clear plan. A failed read cannot hide B, U or N.
+      const permits = (r: RigView) => r.report !== undefined && (reading(r) === "healthy" || reading(r) === "missing");
+      const canClear = flagged && reading(flagged) === "healthy" && m.rigs.every(permits);
+      if (!m.feedDisabled && suspects.length > 0) {
+        const found = suspects.find((r) => evidence(r, flagFrom));
+        if (found) return [{ kind: "flag", rig: found.id }];
+        return pushSuspects();
+      }
+      if (m.clearAllowed && canClear) return [{ kind: "clear" }];
+      if (m.feedDisabled) {
+        if (m.clearAllowed === undefined && suspects.length === 0 && canClear && flagged.confirmed === "healthy") return [{ kind: "clear" }];
+        if (m.clearAlertsManaged) return []; // RB4-04: the clear planner owns the incident's alert
+        return [{ kind: "alert", text: "expired impairment flag while the feed is disabled: owner review required" }];
       }
       const clearPushRigs = m.clearPushRigs ?? [];
       const pushes = m.rigs.filter((r) => clearPushRigs.includes(r.id) && r.confirmed === "healthy").flatMap(push);
       if (pushes.length > 0) return pushes;
       // clearExpiredFlag needs health evidence for the flagged rig, from after seizeStart
-      const flagged = m.rigs.find((r) => r.id === m.loan.impairedRig);
       if (!flagged || flagged.confirmed !== "healthy") return []; // wait until it is confirmed healthy
-      if (reading(flagged) === "healthy") {
-        // without a clear plan from the keeper, check every rig here: none impaired and no failed read
-        const permits = (r: RigView) => readable(r) && reading(r) !== "impaired";
-        return m.clearAllowed === undefined && m.rigs.every(permits) ? [{ kind: "clear" }] : [];
-      }
+      if (reading(flagged) === "healthy") return m.clearAllowed === undefined && canClear ? [{ kind: "clear" }] : [];
       if ((m.rowBRigs ?? []).includes(flagged.id)) return []; // RB3-04: one push per incident, sent by the keeper
+      if (reading(flagged) === "unknown" || (m.recoveryRigs ?? []).includes(flagged.id)) return []; // RB4-05
       return push(flagged);
     }
   }

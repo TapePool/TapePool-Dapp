@@ -89,8 +89,8 @@ export function createApp(deps: AppDeps): App {
   const ui = deps.ui ?? freshUi();
   const { source, actions } = deps;
   let traceController: { unmount(): void; translate(): void } | undefined;
-  let traceModule: typeof import('./dev/trace/view') | undefined;
-  let traceSession: ReturnType<typeof import('./dev/trace/view').createTraceSession> | undefined;
+  let traceModule: typeof import('./tape/view') | undefined;
+  let traceSession: ReturnType<typeof import('./tape/view').createTraceSession> | undefined;
   let traceGeneration = 0;
   let destroyed = false;
   let route: Route = parseHash(win.location.hash);
@@ -156,11 +156,11 @@ export function createApp(deps: AppDeps): App {
     const out = renderApp(c);
     doc.documentElement.lang = getLang() === 'cn' ? 'zh-CN' : 'en';
     put(deps.screen, out.screen);
-    if (import.meta.env.DEV && route.page === 'trace') {
+    if (route.page === 'trace') {
       traceController?.translate();
       if (!traceController) {
         const generation = ++traceGeneration;
-        void (traceModule ? Promise.resolve(traceModule) : import('./dev/trace/view')).then((mod) => {
+        void (traceModule ? Promise.resolve(traceModule) : import('./tape/view')).then((mod) => {
           traceModule = mod;
           const host = deps.screen.querySelector<HTMLElement>('[data-trace-owned]');
           if (!destroyed && generation === traceGeneration && route.page === 'trace' && host && !traceController) traceController = (traceSession ??= mod.createTraceSession(() => new mod.OkxFeed())).mount(host);

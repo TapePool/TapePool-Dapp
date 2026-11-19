@@ -38,7 +38,7 @@ export function morph(a: Node, b: Node): void {
       if (input.value !== next) input.value = next;
     }
   }
-  if (import.meta.env.DEV && ea.hasAttribute('data-trace-owned') && eb.hasAttribute('data-trace-owned')) return;
+  if (ea.hasAttribute('data-trace-owned') && eb.hasAttribute('data-trace-owned')) return;
   if (ea.hasAttribute('data-ascii-live')) return; // a text effect owns the children (src/ascii.ts); it takes the new text from `data-ascii-text`
   morphKids(ea, eb);
 }

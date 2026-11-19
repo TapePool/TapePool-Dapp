@@ -19,6 +19,8 @@ contract RefreshSources {
     function getMiner(bytes32) external view returns (Miner memory m) {
         m.status = stopped ? 3 : 1;
         m.verifWeight = stopped ? 0 : 500;
+        m.bstar = 500;
+        m.mult = 1;
     }
     function harvest(uint256[] calldata ids) external payable returns (uint256) {
         for (uint256 i; i < ids.length; ++i) {

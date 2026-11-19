@@ -2,7 +2,7 @@
 // Opt-in: KEEPER_ANVIL=1 and BSC_RPC (an archive endpoint). Nothing here touches a real chain except
 // the read-only fork source. See test/anvil/harness.ts.
 import { describe, expect, it } from "vitest";
-import { getAddress, pad } from "viem";
+import { getAddress, pad, parseAbiItem } from "viem";
 import { ADDR, SLOT } from "../src/addresses.js";
 import { agentAbi, poolAbi, screenAbi } from "../src/abi.js";
 import {
@@ -248,13 +248,28 @@ describe.skipIf(!process.env.KEEPER_ANVIL || !process.env.BSC_RPC)("keeper on an
 
         // 2. confirmed: the keeper sends an evidence harvest (a cycle later if it must approve its
         //    bond float first); landed, it syncs power 0 on the voucher, and the next cycle flags
-        let landed = 0;
+        let landed = 0, watchedHarvest = false;
         for (let i = 0; i < 2 && landed === 0; i++) {
           await sync(clock.now + 60);
           await k().cycle();
+          // Read the genuine receipt with an independent event declaration, after polling the keeper's send.
+          const harvests = await bsc.getLogs({ address: ADDR.rigVault,
+            event: parseAbiItem("event Harvested(bytes32 indexed guid, uint256[] ids, uint256[] packed)"),
+            fromBlock: mark + 1n, toBlock: await bsc.getBlockNumber() });
+          if (harvests.length > 0) {
+            await s.senders.bsc.poll();
+            const log = harvests.at(-1)!;
+            const receipt = await bsc.getTransactionReceipt({ hash: log.transactionHash });
+            expect(getAddress(receipt.from)).toBe(getAddress(s.clients.account.address));
+            expect(k().state.harvestLandings[log.args.guid!]).toMatchObject({
+              rigs: log.args.ids!.map(String), transaction: log.transactionHash,
+            });
+            watchedHarvest = true;
+          }
           landed = await s.deliverHarvests(mark);
         }
         expect(landed).toBe(1);
+        expect(watchedHarvest).toBe(true);
         expect(s.alertsSeen.some((t) => t.startsWith("sent evidence-harvest"))).toBe(true);
         expect(s.alertsSeen.some((t) => t.startsWith("sent approve BEM bond float"))).toBe(true);
         const [, synced, , pow] = await record();

@@ -42,7 +42,7 @@ describe('the BSC read mirrors BscRigReader', () => {
     expect(vaultForgot(CPU.tapeout)).toBe(false);
   });
 
-  it('custodied needs the cell to be non-zero and to own the circuit NFT; a failed ownerOf reads as no', async () => {
+  it('custodied needs the cell to be non-zero and to own the circuit NFT; a failed ownerOf is unknown', async () => {
     const w = buildWorld();
     addRig(w, 1, readyRig(1)); // the cell owns it
     addRig(w, 2, readyRig(2, {}, { owner: OTHER })); // someone else owns it
@@ -56,9 +56,9 @@ describe('the BSC read mirrors BscRigReader', () => {
     const odd = A(0x0dd);
     w2.b.on(odd, ownerOfAbi, { ownerOf: () => { throw new Error('revert'); } });
     addRig(w2, 9, readyRig(9, {}, { circuits: odd }));
-    expect((await readBsc(w2.b, book, [9], new Map())).facts.get(9)?.custodied).toBe(false);
-    expect(isCustodied(null, A(1))).toBe(false);
-    expect(isCustodied(A(1), null)).toBe(false);
+    expect((await readBsc(w2.b, book, [9], new Map())).facts.has(9)).toBe(false);
+    expect(isCustodied(null, A(1))).toBeNull();
+    expect(isCustodied(A(1), null)).toBeNull();
     expect(isCustodied(A(1), A(1))).toBe(true);
   });
 
@@ -87,7 +87,7 @@ describe('the BSC read mirrors BscRigReader', () => {
   });
 
   it('turns miner data into facts with the types the app uses', () => {
-    const f = factsFromMiner(CPU.tapeout, 7n, { since: 100n, status: 1, stopBlock: 0n, taskId: 4, verifWeight: 30n, bonus: 5n }, 9n, true);
+    const f = factsFromMiner(CPU.tapeout, 7n, { since: 100n, status: 1, stopBlock: 0n, taskId: 4, verifWeight: 30n, bonus: 5n, bstar: 25n, mult: 1 }, 9n, true);
     expect(f).toEqual({ status: 1, stopBlock: 0n, custodied: true, verifWeight: 30n, bonus: 5n, since: 100, mined: 9n, circuits: CPU.tapeout, circuitId: 7n, taskId: 4n });
   });
 });

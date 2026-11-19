@@ -24,6 +24,8 @@ export type KeyCache = Map<string, Hex>;
 const pairKey = (circuits: Address, circuitId: bigint): string => `${circuits.toLowerCase()}:${circuitId}`;
 const ok = <T>(r: Result<T>): T | null => (r.ok ? r.value : null);
 const ZERO = '0x0000000000000000000000000000000000000000';
+// Read the full word: an address decoder would silently discard malformed high bits.
+const custodyOwnerAbi = [{ ...ownerOfAbi[0], outputs: [{ name: '', type: 'uint256' }] }] as const;
 
 /** A public node behind a load balancer that has not seen the block yet. */
 export const headerMissing = (e: unknown): boolean => /header not found|block not found|unknown block/i.test(e instanceof Error ? e.message : String(e));
@@ -114,20 +116,22 @@ async function readAt(reader: Reader, book: AddressBook, ids: readonly number[],
     cell: ok(r3[i * 3 + 2] as Result<Address>),
   }));
 
-  // round 4: does the cell own the circuit NFT? (a read that fails reads as "no", like the contract's capped static call)
+  // round 4: does the cell own the circuit NFT? An unreadable or zero owner leaves the rig unknown.
   // and how much BEM is in the cell. A failed BEM read is NOT zero: it makes `mined` unknown, which the screen treats as unreadable.
   const withCell = rows.filter((r) => r.miner !== null && r.pending !== null && r.cell !== null && r.cell.toLowerCase() !== ZERO);
-  const r4 = withCell.length > 0 ? await multicall(reader, mc, withCell.flatMap((r) => [call<Address>(r.circuits, ownerOfAbi, 'ownerOf', [r.circuitId]), call<bigint>(book.bemBsc, erc20Abi, 'balanceOf', [r.cell as Address])]), at) : [];
+  const r4 = withCell.length > 0 ? await multicall(reader, mc, withCell.flatMap((r) => [call<bigint>(r.circuits, custodyOwnerAbi, 'ownerOf', [r.circuitId]), call<bigint>(book.bemBsc, erc20Abi, 'balanceOf', [r.cell as Address])]), at) : [];
   const owner = new Map<number, Address | null>();
   const cellBem = new Map<number, bigint | null>();
   withCell.forEach((r, i) => {
-    owner.set(r.id, ok((r4 as readonly Result<unknown>[])[i * 2] as Result<Address>));
+    const word = ok((r4 as readonly Result<unknown>[])[i * 2] as Result<bigint>);
+    owner.set(r.id, word !== null && word > 0n && word < (1n << 160n) ? `0x${word.toString(16).padStart(40, '0')}` as Address : null);
     cellBem.set(r.id, ok((r4 as readonly Result<unknown>[])[i * 2 + 1] as Result<bigint>));
   });
 
   for (const r of rows) {
     if (r.miner === null || r.pending === null || r.cell === null) continue; // unreadable: left out
     const custodied = isCustodied(r.cell, owner.get(r.id) ?? null);
+    if (custodied === null) continue; // unknown custody: left out, so the caller falls back
     // a rig with no cell holds nothing in one; otherwise `mined` needs both reads
     const inCell = r.cell.toLowerCase() === ZERO ? 0n : (cellBem.get(r.id) ?? null);
     facts.set(r.id, factsFromMiner(r.circuits, r.circuitId, r.miner, inCell === null ? null : r.pending + inCell, custodied));

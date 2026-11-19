@@ -48,8 +48,8 @@ export function parseHash(hash: string): Route {
   const [a, b, c] = p;
   if (a === undefined) return base('dash', view);
   if ((a === 'supply' || a === 'withdraw') && p.length === 1) return base('dash', view, { modal: a });
-  if (import.meta.env.DEV && a === 'trace' && p.length === 1) return base('trace', view, { redirect: to('/tape') });
-  if (import.meta.env.DEV && a === 'tape' && p.length === 1) return base('trace', view);
+  if (a === 'trace' && p.length === 1) return base('trace', view, { redirect: to('/tape') });
+  if (a === 'tape' && p.length === 1) return base('trace', view);
   if (a === 'markets' && p.length === 1) return base('markets', view);
   if (a === 'markets' && b === 'bem' && p.length === 2) return base('pool', view);
   if ((a === 'borrow' || a === 'loans') && p.length === 1) return base('rigs', view, { redirect: to('/rigs') });

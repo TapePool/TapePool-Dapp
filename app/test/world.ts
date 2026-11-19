@@ -350,7 +350,8 @@ export function buildWorld(env: { VITE_KEEPER_URL?: string; VITE_TAPELENS_ADDRES
       const r = [...state.rigs.values()].find((v) => v.bsc && keccak256(toHex(`${v.bsc.circuits.toLowerCase()}:${v.bsc.circuitId}`)) === key);
       if (!r?.bsc) throw new Error('no miner');
       const m = r.bsc;
-      return { circuits: m.circuits, circuitId: m.circuitId, taskId: m.taskId, gateCount: 100, stateCount: 0, depth: 3, area: 1n, mult: 1, since: BigInt(m.since), status: m.status, registrant: A(1), nandBurn: 0, latchBurn: 0, bstar: 0n, bonus: m.bonus, optimal: false, commitBlock: 0n, firstUnusedId: 0n, stopBlock: m.stopBlock, verifWeight: m.verifWeight, unverWeight: 0n, debt: 0n };
+      // World facts use weight units; reconstruct a raw TapeOut miner at multiplier one.
+      return { circuits: m.circuits, circuitId: m.circuitId, taskId: m.taskId, gateCount: 100, stateCount: 0, depth: 3, area: 1n, mult: 1, since: BigInt(m.since), status: m.status, registrant: A(1), nandBurn: 0, latchBurn: 0, bstar: m.verifWeight > m.bonus ? m.verifWeight - m.bonus : 0n, bonus: m.bonus, optimal: false, commitBlock: 0n, firstUnusedId: 0n, stopBlock: m.stopBlock, verifWeight: m.verifWeight, unverWeight: 0n, debt: 0n };
     },
     pending: ([key]: readonly unknown[]) => {
       const r = [...state.rigs.values()].find((v) => v.bsc && keccak256(toHex(`${v.bsc.circuits.toLowerCase()}:${v.bsc.circuitId}`)) === key);

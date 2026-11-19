@@ -16,7 +16,7 @@ const tapeHref = (root: HTMLElement): string => root.querySelector<HTMLAnchorEle
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-describe('development Tape navigation', () => {
+describe('Tape navigation', () => {
   it('exposes Tape as an ordinary route of the main app, with no fixture query', () => {
     const root = header('');
     const href = tapeHref(root), target = new URL(href, `${ORIGIN}/#/app`);
@@ -46,14 +46,14 @@ describe('development Tape navigation', () => {
     expect(parseHash(`#/app/view/${VIEW}/trace`).redirect).toBe(`#/app/view/${VIEW}/tape`);
   });
 
-  it('omits Tape navigation and both game routes in production', () => {
+  it('keeps Tape navigation and both game routes in production', () => {
     vi.stubEnv('DEV', false);
-    const root = header('?fixture=disconnected');
-    expect(root.querySelector('[data-local-tape]')).toBeNull();
-    expect(root.hasAttribute('data-local-nav')).toBe(false);
-    expect([...root.querySelectorAll('.v2-nav a')].map(a => a.textContent)).not.toContain('Tape');
-    expect(parseHash('#/app/tape').page).toBe('notfound');
-    expect(parseHash('#/app/trace').page).toBe('notfound');
-    expect(parseHash(`#/app/view/${VIEW}/tape`).page).toBe('notfound');
+    const root = header('');
+    expect(tapeHref(root)).toBe('#/app/tape');
+    expect(root.hasAttribute('data-local-nav')).toBe(true);
+    expect([...root.querySelectorAll('.v2-nav a')].map(a => a.textContent).at(-1)).toBe('Tape');
+    expect(parseHash('#/app/tape').page).toBe('trace');
+    expect(parseHash('#/app/trace').redirect).toBe('#/app/tape');
+    expect(parseHash(`#/app/view/${VIEW}/tape`)).toMatchObject({ page: 'trace', view: VIEW });
   });
 });

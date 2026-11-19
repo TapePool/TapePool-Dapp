@@ -9,8 +9,8 @@ import path from 'node:path';
 export const CHUNK_BYTES = 24_000;
 /** A file has at most 350 chunks, and a shell refuses to read more than 8,400,000 bytes (TAP-10 §7.1). */
 export const MAX_CHUNKS = 350;
-/** SPEC-PHASE5-APP §13: at most 600 KB (1 KB = 1,000 bytes, the way the spec counted the 408 KB build) for everything a build holds; raised from 500 KB by the owner on 2026-10-24. */
-export const BUDGET_BYTES = 600_000;
+/** SPEC-PHASE5-APP §13: at most 650 KB (1 KB = 1,000 bytes, the way the spec counted the 408 KB build) for everything a build holds; raised by the owner from 500 KB on 2026-10-24 and from 600 KB on 2026-11-17. */
+export const BUDGET_BYTES = 650_000;
 
 /**
  * What a publish costs in gas. Measured on an X Layer fork (anvil, Cancun) by `deweb.mjs rehearse` on 2026-10-23: a chunk costs a
@@ -196,6 +196,8 @@ export function scanForkLeak(files, { mainnetAddresses, forkText }) {
 export const ALLOWED_HOSTS = new Set([
   'rpc.xlayer.tech',
   'bsc-dataseed.bnbchain.org',
+  // the Tape game's price: OKX public market data, requested only while the Tape page is open (scripts/lib/csp.mjs PRICE_ORIGIN)
+  'www.okx.com',
   'www.oklink.com',
   'bscscan.com',
   'tapeout.net',

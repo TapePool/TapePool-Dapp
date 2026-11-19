@@ -1,4 +1,4 @@
-// The keeper's mirror of SPEC-REDEPLOY-3 R3-00, the only definition of when a report or a voucher record counts.
+// The keeper's mirror of SPEC-REDEPLOY-3 R3-00 as amended by R4-00, when a report or a voucher record counts.
 // `evidenceKind` follows RigAgent._impairment (flagImpaired, seize) and `clearReading` follows RigAgent._verdict
 // (clearExpiredFlag), branch for branch; test/redeploy3.test.ts runs every ParityVectors evidence vector through
 // both. The rest of the keeper plans flags, seizes and clears only through these two functions.
@@ -27,11 +27,11 @@ export interface Report {
 }
 
 export interface VoucherRecord { syncedAt: number; power: bigint }
-export type Verdict = "healthy" | "impaired" | "missing";
+export type Verdict = "healthy" | "impaired" | "missing" | "unknown";
 /** 0 no evidence, 1 row E (report), 2 row VE (voucher record): `ImpairmentFlagged.evidenceKind`. */
 export type Kind = 0 | 1 | 2;
 /** The row that decided a clear reading; null when there is no candidate. */
-export type ClearRow = "H" | "B" | "U" | "VC" | null;
+export type ClearRow = "H" | "B" | "U" | "N" | "VC" | null;
 
 /** The pool's feed state (R3-01): `feedDisabled()` and `feedEnabledAt()`, 0 before the first `enableFeed`. */
 export interface FeedView { disabled: boolean; enabledAt: number }
@@ -57,11 +57,11 @@ export const impaired = (r: Report): boolean => r.status !== 1 || r.stopBlock !=
 export const sane = (r: Report): boolean => r.verifWeight !== 0n && r.verifWeight <= r.totalVerifWeight && r.bonus <= r.verifWeight;
 
 /**
- * R3-00 base(r). `null` and `undefined` are a report with `ok == false` (an empty slot or a reverting feed); the
+ * R4-00 base(r). `null` and `undefined` are a report with `ok == false` (an empty slot or a reverting feed); the
  * planner decides separately that a failed RPC read is never planned on.
  */
-function base(r: Report | null | undefined, id: bigint, feed: FeedView, now: bigint): r is Report {
-  return !!r && !feed.disabled && r.rigId === id && r.observedAt <= now + SKEW;
+function base(r: Report | null | undefined, id: bigint, now: bigint): r is Report {
+  return !!r && r.rigId === id && r.observedAt <= now + SKEW;
 }
 
 const fresh = (r: Report, now: bigint): boolean => now <= r.observedAt + AGE;
@@ -74,8 +74,9 @@ export function known(rec: VoucherRecord | undefined, now: number | bigint): rec
 /**
  * Flag or seize evidence for rig `id` against the caller's floor (`flagEvidenceFrom()` or `seizeEvidenceFrom()`),
  * as `RigAgent._impairment`. Row E (kind 1, first): base(r), observed at or after the enable floor and `floor`,
- * fresh and impaired. Row VE (kind 2): a known power-0 record synced at or after `floor`, unless row S holds: a
- * sane healthy report with base(r) at or after the enable floor and strictly newer than the record, of any age.
+ * fresh and impaired. Rows E and S require the feed on. Row VE (kind 2): a known power-0 record synced at or after
+ * `floor`, unless row S holds: a sane healthy report with base(r) at or after the enable floor and strictly newer
+ * than the record, of any age.
  */
 export function evidenceKind(
   id: bigint,
@@ -87,7 +88,7 @@ export function evidenceKind(
 ): Kind {
   const N = big(now), F = big(floor), ef = big(enableFloor(feed));
   let healthyAt = 0n; // row S, 0 if none: the enable floor is at least MAX_CLOCK_SKEW, so a shield is never 0
-  if (base(report, id, feed, N) && report.observedAt >= ef) {
+  if (!feed.disabled && base(report, id, N) && report.observedAt >= ef) {
     if (impaired(report)) {
       if (report.observedAt >= F && fresh(report, N)) return 1;
     } else if (sane(report)) {
@@ -101,8 +102,10 @@ export function evidenceKind(
 /**
  * The clear reading of rig `id` against `seizeEvidenceFrom()`, as `RigAgent._verdict`: the newest candidate among
  * the report (row H healthy, row B impaired at any age and without the enable floor, row U unknown) and the record
- * (row VC); impairment wins a tie. Row U masks only health (v5): the record decides over it when synced after it,
- * or when its power is 0; a positive record not newer than it leaves the rig missing. No candidate is missing.
+ * (row VC); impairment wins a tie. Rows B and U apply in every brake state (R4-00).
+ * Row N is a non-impaired report at both floors, feed on, that is stale or insane; it also reads unknown. The
+ * record decides over U or N when synced after it, or when its power is 0; a positive record not newer than it leaves
+ * the rig unknown. No candidate is missing.
  */
 export function clearReading(
   id: bigint,
@@ -113,26 +116,27 @@ export function clearReading(
   record: VoucherRecord | undefined,
 ): { verdict: Verdict; row: ClearRow } {
   const N = big(now), F = big(floor), ef = big(enableFloor(feed));
-  let code: 0 | 1 | 2 = 0;
+  let code: 0 | 1 | 2 | 3 = 0;
   let reported = false;
   let at = 0n;
   let row: ClearRow = null;
-  if (base(report, id, feed, N) && report.observedAt >= F) {
+  if (base(report, id, N) && report.observedAt >= F) {
     if (impaired(report)) [code, reported, at, row] = [2, true, report.observedAt, "B"];
-    else if (report.observedAt < ef) [code, reported, at, row] = [0, true, report.observedAt, "U"];
-    else if (fresh(report, N) && sane(report)) [code, reported, at, row] = [1, true, report.observedAt, "H"];
+    else if (feed.disabled || report.observedAt < ef) [code, reported, at, row] = [3, true, report.observedAt, "U"];
+    else if (!fresh(report, N) || !sane(report)) [code, reported, at, row] = [3, true, report.observedAt, "N"];
+    else [code, reported, at, row] = [1, true, report.observedAt, "H"];
   }
   if (known(record, N)) {
     const s = BigInt(record.syncedAt), zero = record.power === 0n;
-    if (s >= F && (!reported || s > at || (s === at && zero) || (code === 0 && zero))) [code, row] = [zero ? 2 : 1, "VC"];
+    if (s >= F && (!reported || s > at || (s === at && zero) || (code === 3 && zero))) [code, row] = [zero ? 2 : 1, "VC"];
   }
-  return { verdict: code === 2 ? "impaired" : code === 1 ? "healthy" : "missing", row };
+  return { verdict: code === 3 ? "unknown" : code === 2 ? "impaired" : code === 1 ? "healthy" : "missing", row };
 }
 
-/** The verdict as the contract's code: 0 missing, 1 healthy, 2 impaired. */
-export const verdictCode = (v: Verdict): 0 | 1 | 2 => (v === "impaired" ? 2 : v === "healthy" ? 1 : 0);
+/** The verdict as the contract's code: 0 missing, 1 healthy, 2 impaired, 3 unknown. */
+export const verdictCode = (v: Verdict): 0 | 1 | 2 | 3 => (v === "unknown" ? 3 : v === "impaired" ? 2 : v === "healthy" ? 1 : 0);
 
-/** The report's own clear candidate (rows H, B and U): healthy, impaired, or missing for row U and no candidate. */
+/** The report's own clear candidate (rows H, B, U and N): healthy, impaired, unknown, or missing with no candidate. */
 export function reportVerdict(r: Report | null | undefined, id: bigint, floor: number, now: number, feed: FeedView = NO_BRAKE): Verdict {
   return clearReading(id, floor, now, feed, r, undefined).verdict;
 }
@@ -149,10 +153,23 @@ export function verdict(id: bigint, floor: number, now: number, report: Report |
 }
 
 /**
- * Per rig and flag incident: the refresh harvest (RB-09) and the row B push (RB3-04). `storedBefore` is the stored
- * report's `observedAt` when the push was sent; `unconfirmed` counts the cycles row B waited on an unconfirmed BSC read.
+ * Per rig and flag incident: the refresh harvest (RB-09), row B push (RB3-04) and unknown recovery (RB4-05).
+ * `storedBefore` is the stored report's `observedAt` when the push was sent; `unconfirmed` counts the cycles row B
+ * or unknown recovery waited on an unconfirmed BSC read.
  */
-export interface RefreshRecord { sentAt?: number; syncedBefore?: number; alerted?: boolean; pushAt?: number; storedBefore?: number; unconfirmed?: number }
+export interface RefreshRecord {
+  sentAt?: number; syncedBefore?: number; alerted?: boolean; pushAt?: number; storedBefore?: number;
+  unconfirmed?: number; unknown?: boolean; brakeAlerted?: boolean; recoveryAlerted?: boolean;
+  suspectSince?: number; impairmentAlerted?: boolean; lastConfirmed?: RigCondition; clearWithheldSince?: number;
+}
+
+/** A push stored below the latest enable floor does not spend the incident's push. */
+export function clearPushState(id: bigint, report: Report | null | undefined, refresh: RefreshRecord, feed: FeedView) {
+  const stored = report && report.rigId === id ? Number(report.observedAt) : 0;
+  const landed = refresh.pushAt !== undefined && stored + LANDED_SLACK >= refresh.pushAt
+    && (refresh.storedBefore === undefined || stored > refresh.storedBefore);
+  return { landed, spent: refresh.pushAt !== undefined && !(landed && stored < enableFloor(feed)) };
+}
 
 export interface ClearContext {
   /** The pool's feed state; no brake ever when absent. */
@@ -164,16 +181,16 @@ export interface ClearContext {
 }
 
 /**
- * The clear plan for one collateral rig of an expired flag. A rig blocks when it reads impaired, or, for the
- * flagged rig, anything but healthy (R3-00); a failed report read always blocks. Missing evidence on another rig
+ * The clear plan for one collateral rig of an expired flag. A rig blocks when it reads impaired or unknown, or,
+ * for the flagged rig, anything but healthy (R4-00); a failed report read always blocks. Missing evidence on another rig
  * permits a clear.
  * - Row B, a stored impaired report decides (RB3-04): when the keeper's own BSC read is healthy, one fresh push
  *   per incident (`pushOnce`) and no harvest; a push stored below the enable floor does not use up the incident.
  *   Once that push has landed, or has not after 10 minutes, and the rig still blocks, the owner is alerted. When
  *   the BSC read is not healthy the owner is alerted at once; while it is unconfirmed the plan waits.
  * - Any other block (RB-09): one refresh harvest per incident when the newest report is healthy, then a push when
- *   the refreshed record needs a newer report (`push`). Row U on a rig the keeper reads as healthy gets no harvest:
- *   the loan machine pushes the flagged rig instead.
+ *   the refreshed record needs a newer report (`push`). Row U or N on a rig the keeper reads as healthy gets no initial
+ *   harvest; its recovery push must target that rig (RB4-05).
  */
 export function clearPlan(
   id: bigint,
@@ -189,26 +206,30 @@ export function clearPlan(
   const open = ctx.pushOpen ?? true;
   const reading = clearReading(id, floor, now, feed, report, record);
   const v = reading.verdict;
-  const blocks = v === "impaired" || (id === flagged && v !== "healthy") || report === undefined;
+  const blocks = v === "impaired" || v === "unknown" || (id === flagged && v !== "healthy") || report === undefined;
   const unreadable = report === undefined || record === undefined;
   const healthyReport = reportHealth(report, id) === "healthy";
   const rowB = blocks && reading.row === "B";
+  // RB4-04: reports still block during a brake, but neither a push nor a refresh can supply row H.
+  if (feed.disabled) return { blocks, harvest: false, push: false, pushOnce: false, alert: blocks && !refresh.brakeAlerted, verdict: v, row: reading.row };
   // RB3-04: the incident's push is spent once sent, unless the report it stored is below the enable floor. Only a
   // report newer than the one stored at send time is the push's: the blocking report itself may be recent enough to
-  // pass the landing slack (final audit L-4). A push restored from the journal has no `storedBefore`.
-  const stored = report && report.rigId === id ? Number(report.observedAt) : 0;
-  const pushLanded = refresh.pushAt !== undefined && stored + LANDED_SLACK >= refresh.pushAt
-    && (refresh.storedBefore === undefined || stored > refresh.storedBefore);
-  const pushSpent = refresh.pushAt !== undefined && !(pushLanded && stored < enableFloor(feed));
+  // pass the landing slack (final audit L-4). A restored incident push may have no `storedBefore`.
+  const { landed: pushLanded, spent: pushSpent } = clearPushState(id, report, refresh, feed);
   const bscHealthy = ctx.confirmed === "healthy";
+  const landed = refresh.sentAt !== undefined && record !== undefined && record.syncedAt >= refresh.sentAt - LANDED_SLACK && (refresh.syncedBefore === undefined || record.syncedAt > refresh.syncedBefore);
+  // RB4-05: once unknown starts recovery, later readings do not reset its push or harvest allowance.
+  if (refresh.unknown || reading.row === "U" || reading.row === "N") {
+    const pushed = pushSpent;
+    const harvest = blocks && bscHealthy && pushed && (pushLanded || now - refresh.pushAt! >= PUSH_LANDING) && refresh.sentAt === undefined;
+    const alert = blocks && !refresh.recoveryAlerted && refresh.sentAt !== undefined && (landed || now - refresh.sentAt >= PUSH_LANDING);
+    return { blocks, harvest, push: false, pushOnce: blocks && bscHealthy && !pushed && open, alert, verdict: v, row: reading.row };
+  }
   const pushOnce = rowB && bscHealthy && !pushSpent && open;
   const rowBAlert = rowB && ctx.confirmed !== null
     && (!bscHealthy || (pushSpent && (pushLanded || now - refresh.pushAt! >= PUSH_LANDING)));
-  // RB-09: one refresh harvest per rig and incident for any other block. Not for row U on a rig the keeper reads as
-  // healthy: the loan machine's push of the flagged rig gives a row H report, so a harvest is redundant (final audit L-3)
-  const rowUPush = blocks && reading.row === "U" && bscHealthy;
-  const harvest = blocks && !rowB && !rowUPush && healthyReport && refresh.sentAt === undefined;
-  const landed = refresh.sentAt !== undefined && record !== undefined && record.syncedAt >= refresh.sentAt - LANDED_SLACK && (refresh.syncedBefore === undefined || record.syncedAt > refresh.syncedBefore);
+  // RB-09: one refresh harvest per rig and incident for any other block.
+  const harvest = blocks && !rowB && healthyReport && refresh.sentAt === undefined;
   // A positive voucher record can clear by itself. Otherwise a fresh report must overtake the
   // blocking reading, including when the refreshed record is below the agent's evidence floor.
   const push = blocks && !rowB && open && landed && healthyReport && (reportVerdict(report, id, floor, now, feed) !== "healthy" || Number(report!.observedAt) <= record!.syncedAt);

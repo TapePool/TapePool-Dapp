@@ -5,6 +5,11 @@
 Tape Pool is a BEM lending pool on [X Layer](https://web3.okx.com/xlayer) for TapeOut miners. Built for the OKX X Layer
 Build X "TapeOut Accelerate" hackathon.
 
+- **App:** [app.tapepool.io](https://app.tapepool.io)
+- **Website:** [tapepool.io](https://tapepool.io)
+
+What it does:
+
 - **Lenders** deposit BEM and receive **tpBEM**, an ERC-4626 share whose value grows with the fees borrowers pay.
 - **Borrowers** are miners who bridged a TapeOut rig to X Layer. They move the rig's RIG voucher into their own agent
   contract and take a BEM advance for 7 or 14 days.
@@ -14,7 +19,7 @@ Build X "TapeOut Accelerate" hackathon.
 - **The credit rule is a public TapeOut circuit.** Whether an advance is allowed is decided by a NAND circuit taped out
   on X Layer and evaluated on-chain. Anyone can read and verify the rule, and no one can change it quietly.
 - **No auctions, no price oracle.** The debt is in BEM and is repaid in BEM, so the BEM price never triggers a
-  liquidation. A slow rig is never seized; a loan is closed by force only if the rig itself is impaired (revoked,
+  liquidation. A slow rig is never seized. A loan is closed by force only if the rig itself is impaired (revoked,
   stopped or rescued), proven on-chain, after a 72-hour window to repay.
 
 ## How TapeOut is used
@@ -32,20 +37,31 @@ circuit ID **1**.
 
 ## Deployed contracts
 
-Live stack on X Layer mainnet (chain 196), deployed 2026-11-02 at blocks 74,859,489–74,859,492.
+The live stack was deployed on 2026-11-16: the pool contracts at X Layer blocks 76,074,240–76,074,248, the rig data
+feed at BSC block 133,949,050 (reporter) and X Layer block 76,073,325 (receiver). Borrows opened on 2026-11-18.
+
+Every contract below that Tape Pool wrote has its source verified as an exact match on
+[Sourcify](https://sourcify.dev), and on the chain's explorer (OKLink for X Layer, BscScan for BSC).
 
 | Contract | Chain | Address | Role |
 |---|---|---|---|
-| `TapePool` (tpBEM) | X Layer | [`0x68c1D5e6f193cE5a5060BF7540Ae391cbC1939ca`](https://www.oklink.com/xlayer/address/0x68c1D5e6f193cE5a5060BF7540Ae391cbC1939ca) | ERC-4626 vault: asset BEM, share tpBEM. Lends to agents, receives repayments, keeps a loss reserve |
-| `AgentFactory` | X Layer | [`0xCB63a96929A28b2F826cD9d5eA67b6f4D200C3B8`](https://www.oklink.com/xlayer/address/0xCB63a96929A28b2F826cD9d5eA67b6f4D200C3B8) | Creates a `RigAgent` clone for a borrower |
-| `RigAgent` implementation | X Layer | [`0x271580Cd37C332A286E5F59836769a54aEaDB4f1`](https://www.oklink.com/xlayer/address/0x271580Cd37C332A286E5F59836769a54aEaDB4f1) | Logic behind every agent clone (EIP-1167) |
-| `CreditPolicy` | X Layer | [`0x8983589e7575738c54339e6BDaddb63375EbFF23`](https://www.oklink.com/xlayer/address/0x8983589e7575738c54339e6BDaddb63375EbFF23) | Calls the policy circuit with a gas cap and strict decoding; any unexpected result means deny |
-| `RigScreen` | X Layer | [`0x3ed768Ba7A72Ce8E9091097ED93616C2560f3ddf`](https://www.oklink.com/xlayer/address/0x3ed768Ba7A72Ce8E9091097ED93616C2560f3ddf) | Records each rig's revocation-screen pass (in effect 48 hours after it is recorded) |
-| `TapeLens` | X Layer | [`0xa66148be3353D85a5b4B028862C5EE9987dd0D84`](https://www.oklink.com/xlayer/address/0xa66148be3353D85a5b4B028862C5EE9987dd0D84) | Read-only helper: how much an agent can borrow right now, and if nothing, why. Holds no state and no funds |
-| `RigFeedReceiver` | X Layer | [`0xB96847a3af4C9eC658cDC77dB98801AF399cFA1d`](https://www.oklink.com/xlayer/address/0xB96847a3af4C9eC658cDC77dB98801AF399cFA1d) | Receives rig reports from BSC over LayerZero and keeps the newest report per rig. Locked: no owner, no delegate |
-| `RigReporter` | BSC | [`0x24b5a7CA358Af29C51d16F801BbEcF746247AF0e`](https://bscscan.com/address/0x24b5a7CA358Af29C51d16F801BbEcF746247AF0e) | Reads PodMining and the rig vault on BSC and sends up to 16 rig reports per message. Locked: no owner, no delegate |
-| Policy circuit: Circuits (ERC-721) | X Layer | [`0xdc76f123838b5398A173D215a2c8338Ad189C9a8`](https://www.oklink.com/xlayer/address/0xdc76f123838b5398A173D215a2c8338Ad189C9a8) | Processor "Tape Pool Policy" (TPPOL); circuit ID 1 is the credit rule |
-| Policy circuit: transistors | X Layer | [`0x05264cF3862266165401d3961935D0D230bC8fd6`](https://www.oklink.com/xlayer/address/0x05264cF3862266165401d3961935D0D230bC8fd6) | The processor's transistors contract |
+| `TapePool` (tpBEM) | X Layer | [`0x1a9A9850D597D8e3a03AFae48E3ac8E2D4aeC9d7`](https://www.oklink.com/x-layer/address/0x1a9A9850D597D8e3a03AFae48E3ac8E2D4aeC9d7) | ERC-4626 vault: asset BEM, share tpBEM. Lends to agents, receives repayments, keeps a loss reserve |
+| `AgentFactory` | X Layer | [`0xA9014E27dD17ea30E4Fa4f71934645b9DCEF8ac8`](https://www.oklink.com/x-layer/address/0xA9014E27dD17ea30E4Fa4f71934645b9DCEF8ac8) | Creates a `RigAgent` clone for a borrower |
+| `RigAgent` implementation | X Layer | [`0x0D4BA9992B2b887ea1f55E59925339547C772259`](https://www.oklink.com/x-layer/address/0x0D4BA9992B2b887ea1f55E59925339547C772259) | Logic behind every agent clone (EIP-1167) |
+| `CreditPolicy` | X Layer | [`0xBBFe498158b6A234f4f63B17673f6e8226656D34`](https://www.oklink.com/x-layer/address/0xBBFe498158b6A234f4f63B17673f6e8226656D34) | Calls the policy circuit with a gas cap and strict decoding; any unexpected result means deny |
+| `RigScreen` | X Layer | [`0xc2bBc2f2EC90e16f8a9619D26A51144Eb0AC1744`](https://www.oklink.com/x-layer/address/0xc2bBc2f2EC90e16f8a9619D26A51144Eb0AC1744) | Records each rig's revocation-screen pass (in effect 48 hours after it is recorded) |
+| `TapeLens` | X Layer | [`0xFcc669BC9cCa397CB01804035D5Be981d7389ef2`](https://www.oklink.com/x-layer/address/0xFcc669BC9cCa397CB01804035D5Be981d7389ef2) | Read-only helper: how much an agent can borrow right now, and if nothing, why. Holds no state and no funds |
+| `RigFeedReceiver` | X Layer | [`0xc94C9Cc912203c29C2c1b3534e0852BF4aFAeA10`](https://www.oklink.com/x-layer/address/0xc94C9Cc912203c29C2c1b3534e0852BF4aFAeA10) | Receives rig reports from BSC over LayerZero and keeps the newest report per rig. Locked: no owner, no delegate |
+| `RigReporter` | BSC | [`0xD54673E73448584E86C61f45203ab507F3F2c3eC`](https://bscscan.com/address/0xD54673E73448584E86C61f45203ab507F3F2c3eC) | Reads PodMining and the rig vault on BSC and sends up to 16 rig reports per message. Locked: no owner, no delegate |
+| Policy circuit: Circuits (ERC-721) | X Layer | [`0xdc76f123838b5398A173D215a2c8338Ad189C9a8`](https://www.oklink.com/x-layer/address/0xdc76f123838b5398A173D215a2c8338Ad189C9a8) | Processor "Tape Pool Policy" (TPPOL), made with the TapeOut factory; circuit ID 1 is the credit rule |
+| Policy circuit: transistors | X Layer | [`0x05264cF3862266165401d3961935D0D230bC8fd6`](https://www.oklink.com/x-layer/address/0x05264cF3862266165401d3961935D0D230bC8fd6) | The processor's transistors contract |
+
+The two policy-circuit contracts run TapeOut's own code, made by the TapeOut factory, so their source is TapeOut's to
+publish. Each agent a borrower creates is a minimal proxy of the `RigAgent` implementation; explorers show it through
+the verified implementation.
+
+The BSC reporter has the same address as the retired 2026-10-21 pool on X Layer (the deployer made both at the same
+nonce on different chains). They are different contracts: always read the chain next to the address.
 
 Roles:
 
@@ -55,7 +71,7 @@ Roles:
 | Guardian (keeper) | `0xB61e09c96B66c02D9518e8f0f9Ce645b8589dBC8` | Only reversible brakes: pause new borrows, suspend a rig's screen pass, switch off the data feed. Only the owner releases them |
 | Deployer | `0x04974a7F899813dBaf0046469Ea73Ff0a5E352F3` | No role in the pool. Holds the policy circuit NFT |
 
-Launch parameters, as read from the pool:
+Parameters, as read from the pool:
 
 | Parameter | Value |
 |---|---|
@@ -70,13 +86,14 @@ Launch parameters, as read from the pool:
 | Late fee | 0 |
 | Operating fee | 0 OKB (sponsored at launch) |
 
-Caps only block new deposits or new borrows; they never block repayments, sweeps or withdrawals. New borrows open when
-the owner lifts the launch pause (`borrowsPaused()` on the pool shows the current state).
+Caps only block new deposits or new borrows; they never block repayments, sweeps or withdrawals. `borrowsPaused()` on
+the pool shows whether new borrows are open.
 
-Retired stacks (supply cap 0, borrows paused; holders can still withdraw, do not deposit): the 2026-10-21 pool
-`0xD54673E73448584E86C61f45203ab507F3F2c3eC` and the 2026-10-31 pool `0xFD48226e11FCFF465033305574D87bCE004314BA`, and the
-2026-10-21 rig feed (reporter `0xCdD7E66c51633255C944DDC43dAe7285a300f1B7`, receiver
-`0x8bd22956fdcfebA48dD37a4fB4c33b226273b4b6`).
+Retired stacks (supply cap 0, borrows paused; holders can still withdraw, do not deposit): the pools
+`0xD54673E73448584E86C61f45203ab507F3F2c3eC` (2026-10-21, X Layer), `0xFD48226e11FCFF465033305574D87bCE004314BA`
+(2026-10-31) and `0x68c1D5e6f193cE5a5060BF7540Ae391cbC1939ca` (2026-11-02), and the rig feeds of 2026-10-21 (reporter
+`0xCdD7E66c51633255C944DDC43dAe7285a300f1B7`, receiver `0x8bd22956fdcfebA48dD37a4fB4c33b226273b4b6`) and 2026-10-31
+(reporter `0x24b5a7CA358Af29C51d16F801BbEcF746247AF0e`, receiver `0xB96847a3af4C9eC658cDC77dB98801AF399cFA1d`).
 
 ### External contracts Tape Pool reads or calls
 
@@ -116,6 +133,7 @@ src/interfaces/  interfaces of the live X Layer, BSC and LayerZero contracts
 src/spike/       feasibility spike, reference only (some fork tests reuse its helpers)
 script/          Forge deploy and check scripts (dry run unless --broadcast is passed)
 test/            unit, fuzz, invariant and fork tests
+docs/security-audits/  the latest security review of the contracts
 ```
 
 ## Run the app
@@ -130,10 +148,11 @@ VITE_NETWORK=redeploy npm run dev       # then open http://localhost:5173/#/app
 
 `VITE_NETWORK=redeploy` selects the live stack above; the default `mainnet` book still names the retired 2026-10-21
 stack. You can also put `VITE_NETWORK=redeploy` (and optionally `VITE_KEEPER_URL=<keeper base URL>`) in `app/.env.local`,
-which is git-ignored. On Windows, `app-dev.cmd` starts the dev server and opens the app.
+which is git-ignored.
 
-Production build: `VITE_NETWORK=redeploy npm run build` writes a static site to `app/dist/`. Hosting, the
-Content-Security-Policy and DeWEB publishing are described in [app/README.md](app/README.md).
+Production build: `VITE_NETWORK=redeploy npm run build` writes a static site to `app/dist/`. The hosted app at
+[app.tapepool.io](https://app.tapepool.io) is built this way from `app/`. Hosting, the Content-Security-Policy and
+DeWEB publishing are described in [app/README.md](app/README.md).
 
 ## Build and test the contracts
 
@@ -152,6 +171,16 @@ Unit tests run on mocks. Fork tests fork X Layer through its public RPC at block
 The BSC suites need an archive endpoint in `BSC_RPC`, kept in a local `.env` file that is never committed; without it they
 skip. Tests never send a transaction to a live chain.
 
+The deployed contracts were compiled with solc 0.8.24, optimizer on at 200 runs, EVM version Cancun; the verified
+sources on the explorers show the same settings.
+
+## Security review
+
+[docs/security-audits/2026-11-05-redeploy-4-prescan.md](docs/security-audits/2026-11-05-redeploy-4-prescan.md) is the
+team's latest review of the deployed contracts and their deployment gates (a Vietnamese copy sits next to it). It was
+done by the Tape Pool team with AI-assisted scanning and triage, and it is not independent. After the hackathon we plan
+a third-party audit.
+
 ## Risks
 
 Smart contracts carry risk: you can lose funds.
@@ -163,8 +192,6 @@ Smart contracts carry risk: you can lose funds.
 - **Trust:** the owner's changes wait in a public queue and no one can move pool funds or vouchers; the keeper holds only
   the three brakes; TapeOut's multisig can upgrade the vouchers and the rig vault, or rescue a rig; LayerZero carries the
   rig data.
-
-Every contract will be verified and reviewed carefully. After the hackathon we plan a third-party audit.
 
 ## License
 

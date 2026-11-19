@@ -43,6 +43,7 @@ export const contractErrors = parseAbi([
 ]);
 
 export const poolAbi = [...contractErrors, ...parseAbi([
+  "function policy() view returns (address)",
   "function tracked() view returns (uint256)",
   "function sync()",
   "function unvestedNow() view returns (uint256)",
@@ -167,10 +168,16 @@ export const erc20Abi = parseAbi([
 export const oftFeeAbi = parseAbi(["function feeBps() view returns (uint16)"]);
 
 export const vaultAbi = parseAbi([
+  "event Harvested(bytes32 indexed guid, uint256[] ids, uint256[] packed)",
+  "function deposits() view returns (uint256)",
   "function rigs(uint256 id) view returns (address circuits, uint256 circuitId)",
   "function cellOf(bytes32 key) view returns (address)",
   "function quoteHarvest(uint256 n) view returns (uint256)",
   "function harvest(uint256[] ids) payable returns (uint256)",
+]);
+
+export const endpointAbi = parseAbi([
+  "function composeQueue(address from, address to, bytes32 guid, uint16 index) view returns (bytes32)",
 ]);
 
 export const podAbi = parseAbi([

@@ -46,9 +46,9 @@ contract Redeploy3RehearsalTest is Test {
         check.checkPoolSeeded(d.pool, d.lens);
     }
 
-    /// The full pre-seed gate, which also checks the reporter on a BSC fork. Skips without BSC_RPC.
-    function test_R3_07_checkStackRunOnTheReusedFeed() public {
-        if (bytes(vm.envOr("BSC_RPC", string(""))).length == 0) vm.skip(true);
+    /// Redeploy 4 retires this feed, so the full gate refuses it (R4-06).
+    function test_R4_06_checkStackRunRefusesTheRetiredFeed() public {
+        vm.expectRevert(bytes("not the redeploy 4 reporter"));
         check.run(address(d.pool), address(d.lens), A.FEED_REPORTER_BSC_2);
     }
 }

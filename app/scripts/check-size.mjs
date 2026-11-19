@@ -4,7 +4,7 @@
 //
 // No folder given: dist (must exist) and dist-single (checked when it exists). It reports every file with its DeWEB chunk count
 // and estimated gas, and FAILS when
-//   - the total is above 600 KB (1 KB = 1,000 bytes);
+//   - the total is above 650 KB (1 KB = 1,000 bytes);
 //   - a keyed RPC pattern, a value from the repository's .env, an address or URL of the fork/test build, or a host that is not
 //     on the allowed list is in any file (findings give file, rule and line, never the matched text);
 //   - index.html has no Content-Security-Policy meta tag, or the policy is not the one of SPEC-PHASE5-APP §10, or the page
@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractMeta, originOf, parse } from './lib/csp.mjs';
+import { PRICE_ORIGIN, extractMeta, originOf, parse } from './lib/csp.mjs';
 import { BUDGET_BYTES, CHUNK_BYTES, addressesIn, chunkRanges, fileGas, purityScan, readDist, scanForkLeak, scanHosts, scanKeyedRpc } from './lib/dist.mjs';
 import { verifySingle } from './lib/single.mjs';
 
@@ -25,7 +25,8 @@ const padL = (s, n) => String(s).padStart(n);
 
 /** open + setFallback + bind, from the rehearsal (scripts/lib/deweb.mjs STEP_GAS). */
 const STEPS_GAS = 480_000;
-const RPC_ORIGINS = ['https://rpc.xlayer.tech', 'https://bsc-dataseed.bnbchain.org'];
+/** The origins every build talks to: the two public RPCs and the price origin of the Tape game. */
+const RPC_ORIGINS = ['https://rpc.xlayer.tech', 'https://bsc-dataseed.bnbchain.org', PRICE_ORIGIN];
 
 /** The values in the repository's .env (names are never printed): none of them may appear in a build. `TP_ENV_FILE` points at another file (the tests use that). */
 function envSecrets() {
@@ -54,7 +55,7 @@ function scanEnvValues(files, secrets) {
   return out;
 }
 
-/** The policy must be the one of SPEC-PHASE5-APP §10, with `connect-src` limited to the two RPCs and the keeper's origin. */
+/** The policy must be the one of SPEC-PHASE5-APP §10, with `connect-src` limited to the two RPCs, the price origin and the keeper's origin. */
 function checkPolicy(html, keeperOrigin, single) {
   const problems = [];
   let csp;
@@ -77,7 +78,7 @@ function checkPolicy(html, keeperOrigin, single) {
   const extra = connect.filter((t) => !RPC_ORIGINS.includes(t));
   for (const r of RPC_ORIGINS) if (!connect.includes(r)) problems.push(`connect-src lacks ${r}`);
   for (const t of extra) {
-    if (!keeperOrigin) problems.push(`connect-src names ${t}, which is neither RPC: set VITE_KEEPER_URL (or pass --keeper) to the value the build used if that is the keeper`);
+    if (!keeperOrigin) problems.push(`connect-src names ${t}, which is neither RPC nor the price origin: set VITE_KEEPER_URL (or pass --keeper) to the value the build used if that is the keeper`);
     else if (t !== keeperOrigin) problems.push(`connect-src names ${t}, not the keeper origin ${keeperOrigin}`);
     else if (!t.startsWith('https://')) problems.push(`the keeper origin ${t} is not https`);
   }

@@ -15,6 +15,8 @@ const NO_ROOM = 14;
 const ABOVE_LEND_LIMIT = 16;
 /** The lens answers that only say the pool has no room for the borrower (NO_ROOM, ABOVE_LEND_LIMIT). */
 export const isRoomReason = (reason: number): boolean => reason === NO_ROOM || reason === ABOVE_LEND_LIMIT;
+/** RC4-04: the lens now names settling as FEED_OFF; older pool-room answers keep the same copy. */
+export const isSettlingReason = (reason: number): boolean => reason === 8 || isRoomReason(reason);
 const CANNOT_CHECK = [1, 3, 4, 5];
 
 export interface TermLimit {
@@ -191,8 +193,8 @@ export function deriveBorrow(snap: Snapshot, ui: UiState, now: Sec): BorrowView 
   const okbEnough = snap.wallet.okb >= need;
   const poolOpen = borrowsOpen(snap.pool);
   const settling = poolOpen && feedSettling(snap.pool, now);
-  // while the feed settles `lendLimit` is (0, 5): the pool-room answers of the lens (14, 16) say no more than the settling line
-  const roomOnly = (reason: number) => settling && isRoomReason(reason);
+  // FEED_OFF and the older pool-room answers add no blocker beyond the settling line in this window.
+  const roomOnly = (reason: number) => settling && isSettlingReason(reason);
 
   // the BEM the rigs mined before the loan is measured against the debt on screen, or the largest debt of the term while there is no valid amount
   const maxDebt = limit.maxPrincipal > 0n ? limit.maxPrincipal + fee(params, term, limit.maxPrincipal) : 0n;

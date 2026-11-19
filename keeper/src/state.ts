@@ -9,7 +9,9 @@ import { initialWatchState, type WatchState } from "./logic/upgradeWatch.js";
 import type { IncomeState } from "./logic/income.js";
 import type { RefreshRecord } from "./logic/evidence.js";
 import type { Spend } from "./logic/budget.js";
-import type { PendingTx } from "./tx.js";
+import type { PendingTx, SendResult } from "./tx.js";
+import type { HarvestLanding } from "./logic/harvestLanding.js";
+import { initialDuplicateWatch, type DuplicateWatch } from "./logic/duplicateWatch.js";
 
 export interface DailyCounts {
   day: number;
@@ -29,6 +31,8 @@ const cleanDay = (d: Partial<DailyCounts> | undefined, fallback: DailyCounts): D
 export interface KeeperState {
   income: IncomeState;
   refresh: Record<string, RefreshRecord>;
+  pushProvenance: Record<string, { at: number; storedBefore: number }>;
+  impairmentPushes: Record<string, { at: number; status: SendResult["status"]; reason?: string }>;
   custodyAlerts: Record<string, number>;
   /** Rig id -> UTC day of the last "report cannot be read" alert for a flagged or suspect loan (final audit L-2). */
   reportAlerts: Record<string, number>;
@@ -41,6 +45,8 @@ export interface KeeperState {
   agents: Record<string, string>; // agent -> borrower
   harvest: HarvestState; // part D §5.1: per-loan maturity schedule and seized vouchers
   evidence: Record<string, EvidenceRec>; // part D §5.2: evidence harvests per incident
+  harvestLandings: Record<string, HarvestLanding>; // RB4-06: guid -> harvest awaiting compose, even after a loan closes
+  duplicateWatch: DuplicateWatch; // RB4-07: pinned scan progress and per-pair suspension limits
   lastPushAt: Record<string, number>; // rig id -> unix seconds of the last impairment push
   lastSweepAt: Record<string, number>; // agent -> unix seconds
   lastForwardAt: Record<string, number>; // agent -> unix seconds of the last forwardVouchers try
@@ -59,7 +65,7 @@ export interface KeeperState {
 
 export function emptyState(startBlock: bigint, factory = ""): KeeperState {
   return {
-    income: {}, refresh: {}, custodyAlerts: {}, reportAlerts: {}, spend: [], spendStartedAt: 0,
+    income: {}, refresh: {}, pushProvenance: {}, impairmentPushes: {}, custodyAlerts: {}, reportAlerts: {}, spend: [], spendStartedAt: 0,
     pendingTx: { bsc: [], xlayer: [] },
     version: 1,
     factory,
@@ -67,6 +73,8 @@ export function emptyState(startBlock: bigint, factory = ""): KeeperState {
     agents: {},
     harvest: initialHarvestState(),
     evidence: {},
+    harvestLandings: {},
+    duplicateWatch: initialDuplicateWatch(),
     lastPushAt: {},
     lastSweepAt: {},
     lastForwardAt: {},
@@ -96,6 +104,7 @@ export function loadState(path: string, startBlock: bigint, factory = ""): Keepe
     const kept = {
       spend: s.spend ?? [], spendStartedAt: s.spendStartedAt ?? 0,
       pendingTx: s.pendingTx ?? { bsc: [], xlayer: [] },
+      harvestLandings: s.harvestLandings ?? {},
       custodyAlerts: s.custodyAlerts ?? {},
       reportAlerts: s.reportAlerts ?? {},
       pushCounts: s.pushCounts ?? {},
@@ -118,6 +127,7 @@ export function loadState(path: string, startBlock: bigint, factory = ""): Keepe
       agents: s.agents ?? {},
       lastForwardAt: s.lastForwardAt ?? {},
       keptAlerts: s.keptAlerts ?? {},
+      duplicateWatch: s.duplicateWatch ?? initialDuplicateWatch(),
       harvest: { ...fresh.harvest, ...(s.harvest ?? {}), loans: s.harvest?.loans ?? {} },
       // records written before the landed check (audit M2) count every send as landed
       evidence: Object.fromEntries(

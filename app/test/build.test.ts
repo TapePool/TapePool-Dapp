@@ -5,7 +5,7 @@ import path from 'node:path';
 import { decodeFunctionData, getAddress } from 'viem';
 import { build } from 'vite';
 import { afterAll, describe, expect, it } from 'vitest';
-import { extractMeta, hashSource, hostHeaders, injectMeta, originOf, parse, policy, replaceMeta, serialize } from '../scripts/lib/csp.mjs';
+import { PRICE_ORIGIN, extractMeta, hashSource, hostHeaders, injectMeta, originOf, parse, policy, replaceMeta, serialize } from '../scripts/lib/csp.mjs';
 import { ABI, SUBMISSION_DEADLINE, TARGET, buildPlan, castScript, gatewayHost, gatewayOpenHost, landing, nameOf, offlineState, planTotals, sameFile } from '../scripts/lib/deweb.mjs';
 import {
   ALLOWED_HOSTS,
@@ -26,6 +26,7 @@ import {
 } from '../scripts/lib/dist.mjs';
 import { inlineSingle, verifySingle } from '../scripts/lib/single.mjs';
 import { MAINNET, PUBLIC_RPC } from '../src/config';
+import { OKX_REST } from '../src/tape/feed';
 
 /**
  * B5: the Content-Security-Policy and how it is built, the size and secret checks, the single-file build, and the DeWEB
@@ -50,7 +51,7 @@ const write = (dir: string, rel: string, data: string | Buffer): void => {
   fs.writeFileSync(path.join(dir, rel), data);
 };
 
-const MAIN_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src https://rpc.xlayer.tech https://bsc-dataseed.bnbchain.org; base-uri 'none'; form-action 'none'";
+const MAIN_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src https://rpc.xlayer.tech https://bsc-dataseed.bnbchain.org https://www.okx.com; base-uri 'none'; form-action 'none'";
 const PAGE = (csp: string, extra = ''): string =>
   `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta http-equiv="Content-Security-Policy" content="${csp}">\n<link rel="icon" href="./assets/a.svg">\n<script type="module" crossorigin src="./assets/a.js"></script>\n<link rel="stylesheet" crossorigin href="./assets/a.css">\n</head>\n<body>${extra}</body>\n</html>\n`;
 
@@ -65,14 +66,16 @@ function miniDist(csp = MAIN_CSP, extra = ''): string {
 }
 
 describe('the policy (SPEC-PHASE5-APP §10)', () => {
-  it('is exactly the one the spec lists, with the two public RPCs and nothing inline', () => {
-    expect(serialize(policy({ connect: [originOf(PUBLIC_RPC.xlayer), originOf(PUBLIC_RPC.bsc)] }))).toBe(MAIN_CSP);
+  it('is exactly the one the spec lists, with the two public RPCs, the price origin of the Tape game and nothing inline', () => {
+    expect(serialize(policy({ connect: [originOf(PUBLIC_RPC.xlayer), originOf(PUBLIC_RPC.bsc), PRICE_ORIGIN] }))).toBe(MAIN_CSP);
     expect(MAIN_CSP).not.toMatch(/unsafe-|\*/);
   });
 
-  it('keeps the RPC origins in step with the app configuration', () => {
+  it('keeps the RPC origins and the price origin in step with the app', () => {
     expect(PUBLIC_RPC).toEqual({ xlayer: 'https://rpc.xlayer.tech', bsc: 'https://bsc-dataseed.bnbchain.org' });
-    expect(MAIN_CSP).toContain(`connect-src ${PUBLIC_RPC.xlayer} ${PUBLIC_RPC.bsc};`);
+    expect(MAIN_CSP).toContain(`connect-src ${PUBLIC_RPC.xlayer} ${PUBLIC_RPC.bsc} ${PRICE_ORIGIN};`);
+    expect(OKX_REST).toBe(PRICE_ORIGIN); // the game requests the very origin the policy allows
+    expect(ALLOWED_HOSTS.has(new URL(PRICE_ORIGIN).hostname)).toBe(true);
   });
 
   it('never writes an empty connect-src as a missing directive (that would fall back to default-src)', () => {
@@ -140,7 +143,7 @@ describe('the build puts the policy in index.html (a real vite build)', () => {
   it('has the mainnet policy, adds the keeper origin only when the app accepts the URL, and drops a path', async () => {
     delete process.env.VITE_NETWORK;
     expect(await buildWith({ VITE_KEEPER_URL: '' })).toBe(MAIN_CSP);
-    expect(await buildWith({ VITE_KEEPER_URL: 'https://keeper.example.com/base/' })).toBe(MAIN_CSP.replace('bnbchain.org;', 'bnbchain.org https://keeper.example.com;'));
+    expect(await buildWith({ VITE_KEEPER_URL: 'https://keeper.example.com/base/' })).toBe(MAIN_CSP.replace('bnbchain.org ', 'bnbchain.org https://keeper.example.com '));
     // the app refuses a plain-http keeper that is not local, so the policy must not name it either
     expect(await buildWith({ VITE_KEEPER_URL: 'http://evil.example.com' })).toBe(MAIN_CSP);
   }, 60_000);
@@ -200,9 +203,9 @@ describe('the files of a build', () => {
     const sizes = [10_357, 6_473, 436, 27_149, 282_415, 21_832, 6_275, 14_724, 15_000, 10_466, 6_944, 5_570, 937];
     const model = sizes.reduce((s, n) => s + fileGas(n), 0);
     expect(Math.abs(model - 94_414_498) / 94_414_498).toBeLessThan(0.01);
-    expect(BUDGET_BYTES).toBe(600_000);
+    expect(BUDGET_BYTES).toBe(650_000);
     // the budget in the spec (about 370 M gas) overstated the cost by about 4x; a full budget costs about this much
-    expect(fileGas(BUDGET_BYTES)).toBeLessThan(140_000_000);
+    expect(fileGas(BUDGET_BYTES)).toBeLessThan(150_000_000);
   });
 });
 
@@ -237,7 +240,9 @@ describe('what must not be in a build', () => {
 
   it('finds what belongs to a fork build, but not the words localhost or 127.0.0.1 that every build holds', () => {
     const main = [...addressesIn(fs.readFileSync(path.join(APP, 'src', 'config.ts'), 'utf8').split('export interface AppConfig')[0])];
-    expect(main.length).toBe(22); // the fifteen addresses of the mainnet book and the seven new ones of the redeploy book
+    // the fifteen addresses of the mainnet book and the six new ones of the redeploy book: the redeploy 4 reporter on
+    // BSC has the address of the legacy pool on X Layer (same deployer and nonce on another chain), so it adds none
+    expect(main.length).toBe(21);
     const fork = JSON.stringify({ pool: '0x1111111111111111111111111111111111111111', voucher: MAINNET.voucher });
     const run = (text: string, forkText: string | null = null) => scanForkLeak([file(text)], { mainnetAddresses: main, forkText }) as { rule: string }[];
     expect(run('u.hostname==="localhost"||u.hostname==="127.0.0.1";/^http:\\/\\/(127\\.0\\.0\\.1|localhost):\\d{2,5}$/')).toEqual([]);
@@ -289,7 +294,7 @@ describe('the single-file build', () => {
     expect(p['script-src']).toEqual([hashSource(js)]);
     expect(p['style-src']).toEqual([hashSource('body{margin:0}')]);
     expect(p['font-src']).toEqual(['data:']);
-    expect(p['connect-src']).toEqual(['https://rpc.xlayer.tech', 'https://bsc-dataseed.bnbchain.org']);
+    expect(p['connect-src']).toEqual(['https://rpc.xlayer.tech', 'https://bsc-dataseed.bnbchain.org', 'https://www.okx.com']);
     expect(verifySingle(out)).toEqual([]);
   });
 
@@ -489,7 +494,7 @@ describe('check:size as a command', () => {
     const none = tmp();
     write(none, 'index.html', '<!doctype html><meta charset="utf-8">');
     expect(run(none).stdout).toMatch(/no Content-Security-Policy/);
-    const rogue = miniDist(MAIN_CSP.replace('bnbchain.org;', 'bnbchain.org https://rogue.example;'));
+    const rogue = miniDist(MAIN_CSP.replace('bnbchain.org ', 'bnbchain.org https://rogue.example '));
     expect(run(rogue).stdout).toMatch(/connect-src names https:\/\/rogue.example/);
     expect(run(rogue, ['--keeper', 'https://rogue.example']).stdout).not.toMatch(/connect-src names/);
   });

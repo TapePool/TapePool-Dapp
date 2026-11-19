@@ -89,6 +89,9 @@ contract TapeLensTest is Base {
 
         vm.prank(owner);
         pool.lowerCap(TapePool.Param.BorrowCapAbs, 0);
+        assertEq(lens.quote(a, 0).reason, Reasons.FEED_OFF);
+        vm.warp(uint256(pool.feedEnabledAt()) + pool.FEED_SETTLE());
+        _refresh(ID, 100);
         assertEq(lens.quote(a, 0).reason, Reasons.NO_ROOM);
         vm.prank(owner);
         pool.queueParam(TapePool.Param.BorrowCapAbs, 10 * BEM);
@@ -103,6 +106,63 @@ contract TapeLensTest is Base {
         vm.prank(address(c));
         voucher.transferFrom(address(c), bob, 9);
         assertEq(lens.quote(c, 0).reason, Reasons.NO_COLLATERAL, "a voucher the agent no longer owns");
+    }
+
+    function _checkQuotes(RigAgent a, uint8 term, uint8 expectedReason) internal view {
+        TapeLens.Quote memory q = lens.quote(a, term);
+        assertEq(q.reason, expectedReason);
+        (uint256 fee, uint16 lateBps, uint256 debt, bool allowed, uint8 reason, uint8 binding) =
+            lens.quoteFor(a, term, BEM);
+        assertEq(reason, expectedReason);
+        assertEq(fee, pool.fee(term, BEM));
+        assertEq(debt, BEM + fee);
+        assertEq(lateBps, pool.lateFeeBpsPerDay());
+        assertEq(allowed, expectedReason == Reasons.OK);
+        assertEq(binding, 0);
+        if (expectedReason == Reasons.OK) assertGt(q.maxPrincipal, 0);
+        else assertEq(q.maxPrincipal, 0);
+    }
+
+    function test_R4_05_quotesNameSettlingAt359AndAllowAt360() public {
+        RigAgent a = _ready(alice, ID);
+        vm.prank(guardian);
+        pool.disableFeed();
+        vm.prank(owner);
+        pool.enableFeed();
+        uint256 enabledAt = pool.feedEnabledAt();
+        vm.warp(enabledAt + 359);
+        _refresh(ID, 100);
+        for (uint8 term; term < 2; ++term) {
+            _checkQuotes(a, term, Reasons.FEED_OFF);
+        }
+        vm.warp(enabledAt + 360);
+        for (uint8 term; term < 2; ++term) {
+            _checkQuotes(a, term, Reasons.OK);
+        }
+    }
+
+    function test_R4_05_pausePrecedesSettlingForBothQuotes() public {
+        RigAgent a = _ready(alice, ID);
+        vm.prank(guardian);
+        pool.disableFeed();
+        vm.prank(owner);
+        pool.enableFeed();
+        vm.warp(uint256(pool.feedEnabledAt()) + 359);
+        _refresh(ID, 100);
+        vm.prank(guardian);
+        pool.pauseBorrows();
+        for (uint8 term; term < 2; ++term) {
+            _checkQuotes(a, term, Reasons.PAUSED);
+        }
+    }
+
+    function test_R4_05_zeroEnabledAtDoesNotBlockAtRealTimestamp() public {
+        RigAgent a = _ready(alice, ID);
+        assertEq(pool.feedEnabledAt(), 0);
+        assertGt(block.timestamp, 360);
+        for (uint8 term; term < 2; ++term) {
+            _checkQuotes(a, term, Reasons.OK);
+        }
     }
 
     function test_quote_on_a_closed_agent() public {

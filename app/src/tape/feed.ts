@@ -1,12 +1,16 @@
 import { KEEP, STEP, TICKS } from './engine';
 
-/** OKX public market data: no login, no API key. Port 443; OKX is retiring 8443. */
-export const OKX_WS = 'wss://ws.okx.com/ws/v5/public';
+/**
+ * OKX public market data over HTTPS: no login, no API key. HTTPS only on purpose: a DeWEB gateway's policy allows no
+ * WebSocket, so one feed serves the app wherever it is hosted.
+ */
 export const OKX_REST = 'https://www.okx.com';
 /** The OKB-USD index: OKX's aggregate of several venues, so one thin order book cannot move it alone. */
 export const INDEX = 'OKB-USD';
-/** OKX closes a socket after 30 s without traffic; ping after 20 s of silence and give up 20 s later. */
-export const PING_MS = 20_000;
+/** OKX refreshes the index about once a second (measured 2026-11-17), so one request a second per visitor sees every value. */
+export const POLL_MS = 1000;
+/** A request with no answer after this long is abandoned and counts as a failure. */
+export const TIMEOUT_MS = 4000;
 /** A price older than this stops the game: no samples, no deadlines, until a fresh one arrives. */
 export const STALE_MS = 5_000;
 const RETRY_MS = [1000, 2000, 5000, 10_000];
@@ -33,7 +37,7 @@ export function ticks(value: unknown): number | null {
 
 /**
  * Turns 1 s candles (`[ts, open, high, low, close, confirm]`, any order) into samples one STEP apart ending at `end`.
- * Each sample holds the close of the newest candle that had finished by then, as live samples hold the newest push.
+ * Each sample holds the close of the newest candle that had finished by then, as live samples hold the newest reading.
  */
 export function samplesFromCandles(rows: unknown, end: number, count = KEEP): number[] {
   if (!Array.isArray(rows)) return [];
@@ -51,9 +55,7 @@ export function samplesFromCandles(rows: unknown, end: number, count = KEEP): nu
   return out;
 }
 
-interface Socket { readyState: number; send(data: string): void; close(): void; onopen: ((e: unknown) => void) | null; onmessage: ((e: { data: unknown }) => void) | null; onclose: ((e: unknown) => void) | null; onerror: ((e: unknown) => void) | null }
 export interface OkxDeps {
-  socket?: (url: string) => Socket;
   fetch?: (url: string) => Promise<{ json(): Promise<unknown> }>;
   /** Clock for arrival times; the view compares them with animation frame timestamps. */
   clock?: () => number;
@@ -63,23 +65,28 @@ export interface OkxDeps {
   cancel?: (id: unknown) => void;
 }
 
-/** Streams the OKB-USD index from OKX with keep-alive pings, maintenance notices and reconnects. Read-only. */
+/** Sends no cookie and no referrer, never reads a cache, and gives up after TIMEOUT_MS. */
+const request = (url: string): Promise<{ json(): Promise<unknown> }> =>
+  fetch(url, { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer', ...(typeof AbortSignal.timeout === 'function' ? { signal: AbortSignal.timeout(TIMEOUT_MS) } : {}) });
+
+/** Polls the OKB-USD index from OKX once a second, backing off while requests fail. Read-only. */
 export class OkxFeed implements PriceFeed {
-  private ws: Socket | undefined;
   private last: { price: number; at: number } | null = null;
+  /** OKX's timestamp of the newest index reading taken. */
+  private stamp = 0;
   private running = false;
-  private attempt = 0;
-  private quiet: unknown;
-  private retry: unknown;
-  private readonly socket: (url: string) => Socket;
+  /** Each request belongs to a turn; an answer from an earlier turn (stopped, restarted or timed out) is ignored. */
+  private turn = 0;
+  private failures = 0;
+  private next: unknown;
+  private deadline: unknown;
   private readonly get: (url: string) => Promise<{ json(): Promise<unknown> }>;
   private readonly clock: () => number;
   private readonly wall: () => number;
   private readonly timer: (fn: () => void, ms: number) => unknown;
   private readonly cancel: (id: unknown) => void;
   constructor(deps: OkxDeps = {}) {
-    this.socket = deps.socket ?? ((url) => new WebSocket(url) as unknown as Socket);
-    this.get = deps.fetch ?? ((url) => fetch(url));
+    this.get = deps.fetch ?? request;
     this.clock = deps.clock ?? (() => performance.now());
     this.wall = deps.wall ?? (() => Date.now());
     this.timer = deps.timer ?? ((fn, ms) => setTimeout(fn, ms));
@@ -88,10 +95,9 @@ export class OkxFeed implements PriceFeed {
   latest(): { price: number; at: number } | null { return this.last; }
   state(now: number): FeedState { return !this.last ? 'connecting' : now - this.last.at > STALE_MS ? 'stale' : 'live'; }
   /** Forgets any earlier price, so a restarted feed never serves one from before the restart. */
-  start(): void { if (this.running) return; this.running = true; this.attempt = 0; this.last = null; this.connect(); }
+  start(): void { if (this.running) return; this.running = true; this.failures = 0; this.last = null; this.stamp = 0; this.poll(); }
   stop(): void {
-    this.running = false; this.cancel(this.quiet); this.cancel(this.retry); this.quiet = this.retry = undefined;
-    this.drop();
+    this.running = false; this.turn++; this.cancel(this.next); this.cancel(this.deadline); this.next = this.deadline = undefined;
   }
   async history(): Promise<number[]> {
     const end = this.wall(), url = `${OKX_REST}/api/v5/market/index-candles?instId=${INDEX}&bar=1s&limit=100`;
@@ -105,46 +111,31 @@ export class OkxFeed implements PriceFeed {
     const older = Number.isFinite(oldest) ? await page(oldest) : [];
     return samplesFromCandles([...newest, ...older], end);
   }
-  private connect(): void {
-    const ws = this.socket(OKX_WS); this.ws = ws;
-    ws.onopen = () => {
-      this.attempt = 0;
-      ws.send(JSON.stringify({ op: 'subscribe', args: [{ channel: 'index-tickers', instId: INDEX }] }));
-      this.listen();
+  /** One request, then the next: POLL_MS after this one was sent when it answered, later and later while it does not. */
+  private poll(): void {
+    const turn = ++this.turn, sent = this.clock();
+    const settle = (ok: boolean): void => {
+      if (turn !== this.turn || !this.running) return;
+      this.turn++; this.cancel(this.deadline); this.deadline = undefined;
+      this.failures = ok ? 0 : this.failures + 1;
+      const wait = ok ? Math.max(0, POLL_MS - (this.clock() - sent)) : RETRY_MS[Math.min(this.failures - 1, RETRY_MS.length - 1)]!;
+      this.next = this.timer(() => { this.next = undefined; if (this.running) this.poll(); }, wait);
     };
-    ws.onmessage = (e) => {
-      this.listen();
-      if (e.data === 'pong' || typeof e.data !== 'string') return;
-      let message: { event?: unknown; code?: unknown; arg?: { channel?: unknown; instId?: unknown }; data?: unknown };
-      try { message = JSON.parse(e.data); } catch { return; }
-      // Code 64008 announces a service upgrade and asks clients to reconnect. Other notices (64010: port 8443 retiring)
-      // and errors are not cured by reconnecting, which would only loop; without prices the game simply waits.
-      if (message.event === 'notice' && message.code === '64008') { this.reconnect(); return; }
-      if (message.arg?.channel !== 'index-tickers' || message.arg.instId !== INDEX || !Array.isArray(message.data)) return;
-      const row = message.data[0] as { idxPx?: unknown } | undefined, price = ticks(row?.idxPx);
-      if (price !== null) this.last = { price, at: this.clock() };
-    };
-    ws.onclose = () => { if (this.ws === ws) this.reconnect(); };
-    ws.onerror = () => { if (this.ws === ws) this.reconnect(); };
+    this.deadline = this.timer(() => settle(false), TIMEOUT_MS);
+    let answer: Promise<unknown>;
+    try { answer = this.get(`${OKX_REST}/api/v5/market/index-tickers?instId=${INDEX}`).then((r) => r.json()); } catch { settle(false); return; }
+    answer.then((body) => settle(turn === this.turn && this.running && this.take(body)), () => settle(false));
   }
-  /** After each message: ping once the line has been quiet for PING_MS, reconnect if it stays quiet as long again. */
-  private listen(): void {
-    this.cancel(this.quiet);
-    this.quiet = this.timer(() => {
-      try { this.ws?.send('ping'); } catch { /* the close handler reconnects */ }
-      this.quiet = this.timer(() => this.reconnect(), PING_MS);
-    }, PING_MS);
-  }
-  private reconnect(): void {
-    this.drop(); this.cancel(this.quiet); this.cancel(this.retry);
-    if (!this.running) return;
-    const wait = RETRY_MS[Math.min(this.attempt++, RETRY_MS.length - 1)]!;
-    this.retry = this.timer(() => { this.retry = undefined; if (this.running) this.connect(); }, wait);
-  }
-  private drop(): void {
-    const ws = this.ws; this.ws = undefined;
-    if (!ws) return;
-    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
-    try { ws.close(); } catch { /* already closed */ }
+  /** Reads one answer. False when it is not a well-formed reading of the index. */
+  private take(body: unknown): boolean {
+    const b = body as { code?: unknown; data?: unknown } | null;
+    const row = b?.code === '0' && Array.isArray(b.data) ? b.data[0] as { instId?: unknown; idxPx?: unknown; ts?: unknown } | undefined : undefined;
+    const price = row?.instId === INDEX ? ticks(row.idxPx) : null;
+    const stamp = typeof row?.ts === 'string' && /^\d{1,15}$/.test(row.ts) ? Number(row.ts) : 0;
+    if (price === null || stamp <= 0) return false;
+    // OKX stamps every refresh of the index, also when the price did not move. An answer with no newer stamp is the same
+    // reading again (a cache on the way, or the index standing still), so it does not make the price fresh: the game waits.
+    if (stamp > this.stamp) { this.stamp = stamp; this.last = { price, at: this.clock() }; }
+    return true;
   }
 }
