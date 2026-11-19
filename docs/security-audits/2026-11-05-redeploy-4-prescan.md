@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-11  
 **Type:** Security audit by the Tape Pool team: AI-assisted scan, AI evidence triage and human owner decisions. Not independent.  
-**Release state:** private. The separate reader passed the revised report on its third reading (2026-11-11), and the Vietnamese copies followed. On 2026-11-13 the links were repointed at the repository, and the run files they cite were copied into `runs/`, which stays out of git under template rule 7; the text was not changed otherwise. On 2026-11-15 M-01 received its Status and Resolution line (template §2 step 9), and the summary counts follow it. Publication is not authorized.
+**Release state:** public. The owner published this report on 2026-11-19 with the deployed contracts. The separate reader passed the revised report on its third reading (2026-11-11), and the Vietnamese copies followed. On 2026-11-13 the links were repointed at the repository, and the run files they cite were copied into `runs/`, which stays out of git under template rule 7; the text was not changed otherwise. On 2026-11-15 M-01 received its Status and Resolution line (template §2 step 9), and the summary counts follow it.
 
 ## Executive Summary
 
@@ -60,7 +60,7 @@ Directory boundary: `src/*.sol`, `src/feed/`, `src/libraries/` and `src/interfac
 
 **Out of scope:** app/web, keeper, screen proof tooling, off-chain services, signing and key custody, and the live TapeOut voucher, vault, factory, PodMining and LayerZero implementations. Tests support the audit but are not production audit targets. Omitted runbooks and historical documents were not fetched. External reads test selected behaviour, not all external authorization paths.
 
-**Deployment (private):** this is the proposed redeploy stack before deployment. No address or block is asserted for this new stack. Existing-chain addresses used by fork fixtures do not identify deployment of this audited stack. Reports and raw files remain private; publication was not authorized.
+**Deployment:** this report covers the proposed redeploy stack before deployment, so it asserts no address or block for that stack. Existing-chain addresses used by fork fixtures do not identify deployment of this audited stack. The stack was deployed on 2026-11-16, and its contract sources are verified on Sourcify, OKLink and BscScan. The raw run files stay out of git.
 
 **Build:** Solidity 0.8.24, Cancun, optimizer enabled with 200 runs, OpenZeppelin 5.1.0, Foundry 1.5.1-stable. The current commands compile offline and write build/cache artifacts under `out/`.
 
