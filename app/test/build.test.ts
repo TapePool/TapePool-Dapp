@@ -25,7 +25,7 @@ import {
   shellContentType,
 } from '../scripts/lib/dist.mjs';
 import { inlineSingle, verifySingle } from '../scripts/lib/single.mjs';
-import { MAINNET, PUBLIC_RPC } from '../src/config';
+import { DEWEB_URL, MAINNET, PUBLIC_RPC } from '../src/config';
 import { OKX_REST } from '../src/tape/feed';
 
 /**
@@ -330,6 +330,9 @@ describe('the DeWEB plan', () => {
     expect(nameOf()).toBe('1.2.382.tape');
     expect(gatewayHost()).toBe('1-2-382.tapekit.org');
     expect(gatewayOpenHost()).toBe('1-2-382-open.tapekit.org');
+    // the footer link of the app is this very address, and the build check lets it through
+    expect(DEWEB_URL).toBe(`https://${gatewayHost()}/`);
+    expect(ALLOWED_HOSTS.has(gatewayHost())).toBe(true);
     // TAP-10 §3.3: a gateway label must match this pattern
     expect(gatewayHost().split('.')[0]).toMatch(/^[1-9][0-9]*-(?:[1-9][0-9]*-)?(0|[1-9][0-9]*)$/);
   });

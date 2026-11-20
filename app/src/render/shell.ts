@@ -1,6 +1,6 @@
 import { hourglassFrame, TERMINAL } from '../ascii';
 import { errorDetails, errorText } from '../chain/errors';
-import { DOCS_URL, explorerAddress, LANDING_URL, TWITTER_URL } from '../config';
+import { DEWEB_URL, DOCS_URL, explorerAddress, LANDING_URL, TWITTER_URL } from '../config';
 import { fd, shortAddr } from '../logic/format';
 import { EMPTY, html, raw, type Html } from '../html';
 import { getLang, t, th } from '../i18n';
@@ -47,6 +47,7 @@ export function footer(c: Ctx): Html {
   return html`<footer class="v2-ft">${[
     ext(LANDING_URL, 'Landing'),
     ext(DOCS_URL, 'Documentation'),
+    ext(DEWEB_URL, 'DeWEB'),
     ext(TWITTER_URL, 'Twitter/X'),
   ]}<span class="built"><span>${t('Built on', '构建于')}</span>${img('tapeout')}<span class="c-soft">TapeOut</span><span aria-hidden="true">·</span>${img('xlayer')}<span class="c-soft">X Layer</span><span aria-hidden="true">·</span>${img('fabx')}<span class="c-soft">FabX</span></span></footer>`;
 }

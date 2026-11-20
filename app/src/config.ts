@@ -11,6 +11,8 @@ export const TWITTER_URL = 'https://x.com/Tape_Pool';
 /** The landing page and the documentation site, linked from the footer. */
 export const LANDING_URL = 'https://tapepool.io';
 export const DOCS_URL = 'https://docs.tapepool.io';
+/** This app as stored on X Layer DeWEB: the gateway address of the site `1.2.382.tape`, in the container of the policy circuit. */
+export const DEWEB_URL = 'https://1-2-382.tapekit.org/';
 
 /* ───────── address book (SPEC-PHASE5-APP §3) ───────── */
 

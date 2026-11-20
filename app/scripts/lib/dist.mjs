@@ -202,6 +202,11 @@ export const ALLOWED_HOSTS = new Set([
   'bscscan.com',
   'tapeout.net',
   'x.com',
+  // TapePool's own landing page and docs, the footer links (src/config.ts LANDING_URL, DOCS_URL): opened in a new tab, never requested
+  'tapepool.io',
+  'docs.tapepool.io',
+  // this app's own DeWEB address, a footer link (src/config.ts DEWEB_URL; the name comes from scripts/lib/deweb.mjs gatewayHost)
+  '1-2-382.tapekit.org',
   // the official download pages of the recommended wallets in the connect dialog: links the reader opens in a new tab, never requested
   'web3.okx.com',
   'metamask.io',

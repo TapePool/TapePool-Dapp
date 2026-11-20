@@ -43,6 +43,14 @@ describe('settled copy decisions', () => {
     must(make('connected', { hash: '#/app/markets', lang: 'cn' }).html, 'FAB 资金池计划支持 FabX 矿机。', 'tooltip');
   });
 
+  it('links the footer to the landing page, the docs, the DeWEB copy of this app and X, each in a new tab', () => {
+    for (const lang of ['en', 'cn'] as const) {
+      const html = make('connected', { hash: '#/app/markets', lang }).html;
+      const links = [...html.matchAll(/<a class="ft-link" href="([^"]+)" target="_blank" rel="noopener noreferrer">([^<]+)<\/a>/g)].map((m) => [m[2], m[1]]);
+      expect(links, lang).toEqual([['Landing', 'https://tapepool.io'], ['Documentation', 'https://docs.tapepool.io'], ['DeWEB', 'https://1-2-382.tapekit.org/'], ['Twitter/X', 'https://x.com/Tape_Pool']]);
+    }
+  });
+
   it('S-6: the Alerts card keeps its button, off, with a Coming soon tag', () => {
     const m = make('connected', { hash: '#/app/rigs' });
     must(m.html, '<button type="button" class="btn btn-x" disabled>Turn on Telegram alerts</button>', 'alerts');
