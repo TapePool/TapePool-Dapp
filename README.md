@@ -6,6 +6,7 @@ Tape Pool is a BEM lending pool on [X Layer](https://web3.okx.com/xlayer) for Ta
 Build X "TapeOut Accelerate" hackathon.
 
 - **App:** [app.tapepool.io](https://app.tapepool.io)
+- **App on X Layer DeWEB:** [1-2-382.tapekit.org](https://1-2-382.tapekit.org/) (`tape://1.2.382.tape`, the app stored on chain)
 - **Website:** [tapepool.io](https://tapepool.io)
 
 What it does:
@@ -30,7 +31,7 @@ What it does:
 | RIG vouchers (ERC-721) | The collateral. The borrower's agent holds the voucher during the loan, so the rig's harvests repay the debt |
 | PodMining and the rig vault on BSC | The source of each rig's base power, status and pending output, read on BSC and carried to X Layer by our rig data feed (LayerZero) |
 | BEM | The pool's asset: deposits, advances, fees and repayments are all in BEM |
-| DeWEB / TapeKit | The app builds as a static site ready for DeWEB, in the container of the policy circuit (`app/scripts/deweb.mjs`) |
+| DeWEB / TapeKit | The app is published on X Layer DeWEB as `1.2.382.tape`, in the container of the policy circuit, and served at [1-2-382.tapekit.org](https://1-2-382.tapekit.org/) (`app/scripts/deweb.mjs`) |
 
 **Hackathon submission values:** processor Circuits contract `0xdc76f123838b5398A173D215a2c8338Ad189C9a8` (X Layer),
 circuit ID **1**.
@@ -178,7 +179,7 @@ with `redeploy`. You can also put `VITE_NETWORK=redeploy` (and optionally `VITE_
 which is git-ignored.
 
 Production build: `VITE_NETWORK=redeploy npm run build` writes a static site to `app/dist/`. The hosted app at
-[app.tapepool.io](https://app.tapepool.io) is built this way from `app/`. Hosting, the Content-Security-Policy and
+[app.tapepool.io](https://app.tapepool.io) and its DeWEB copy are built this way from `app/`. Hosting, the Content-Security-Policy and
 DeWEB publishing are described in [app/README.md](app/README.md).
 
 ## Build and test the contracts
