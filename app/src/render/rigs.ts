@@ -10,6 +10,7 @@ import { flow, assetSeg, rigInfo, rigMeta } from './borrow';
 import { alerts, elig, help } from './cards';
 import { releaseEntries } from './release';
 import { loanActions, loanCard, loanChip } from './loan';
+import { lineAction, lineChip, lineKind, lineOf, lineText } from './register';
 import { poolNotice } from './shell';
 import { B, act, back, bar, chip, cl, type ChipKind, type Ctx } from './ui';
 
@@ -36,20 +37,24 @@ export function rigWhy(r: RigView): string {
     case 'not-screened':
       if (s.why === 'suspended') return t('The screen pass of this rig is suspended, so it cannot borrow until it is screened again.', '这台矿机的筛查通过记录已被暂停，重新筛查前无法借款。');
       if (s.why === 'changed') return t('This rig changed and needs a new screen.', '矿机已变更，需重新筛查。');
-      return screenNote();
+      // the registration line (render/register.ts) says the rest for a rig of the wallet
+      return t('Every rig needs a screen pass before it can borrow.', '每台矿机借款前都需要通过筛查。');
     case 'screen-pending':
-      return t(`The screen passed. It counts from ${fd(s.effectiveAt, true)}, 48 h after it was recorded on-chain.`, `筛查已通过，${fd(s.effectiveAt, true)} 起生效（链上记录 48 小时后）。`);
+      return t(`The screen passed. It counts from ${fd(s.effectiveAt, true)}.`, `筛查已通过，${fd(s.effectiveAt, true)} 起生效。`);
     default:
       return '';
   }
 }
 
-/** Option C of SPEC-PHASE5-APP §12: a static note, no request. */
-export const screenNote = (): string =>
-  t(
-    'Every rig needs a screen pass before it can borrow. The TapePool team screens new rigs; a pass counts 48 h after it is recorded on-chain.',
-    '每台矿机借款前都需要通过筛查。TapePool 团队会为新矿机做筛查；筛查结果记录上链 48 小时后生效。',
-  );
+/**
+ * The text of a rig that cannot borrow: the row's own reason, or, at rows 10, 12 (no pass) and 13, the registration line of
+ * SPEC-PHASE5-REGISTER §5 (a too-new rig keeps its age line first).
+ */
+function whyText(c: Ctx, r: RigView): string {
+  const line = lineOf(c, r);
+  if (!line) return rigWhy(r);
+  return r.state.kind === 'too-new' ? `${rigWhy(r)} ${lineText(c, line)}` : lineText(c, line);
+}
 
 function chipFor(c: Ctx, r: RigView): Html {
   const L = loanForRig(c.snap, r.id);
@@ -79,8 +84,12 @@ function chipFor(c: Ctx, r: RigView): Html {
       return k('n', 'Too new', '未满 3 天');
     case 'no-base-power':
       return k('n', 'No base power', '无基础算力');
-    case 'not-screened':
+    case 'not-screened': {
+      const line = s.why === 'none' ? lineOf(c, r) : null;
+      const own = line ? lineChip(line) : null;
+      if (own) return own;
       return s.why === 'none' ? k('w', 'Not screened', '尚未筛查') : s.why === 'suspended' ? k('w', 'Screen suspended', '筛查已暂停') : k('w', 'Screen changed', '筛查需更新');
+    }
     case 'screen-pending':
       return k('w', 'Screen passed', '筛查已通过');
     case 'ready':
@@ -172,9 +181,13 @@ export function rigCard(c: Ctx, r: RigView): Html {
     body = html`<div class="row"><span class="mut">${t('Borrow up to', '最多可借')}</span>${B(max)}</div><div class="row t12"><span class="mut">${ops > 0n ? t(`${p.termDays[0]} days · fee ${pctBps(p.feeBps[0])} + ${native(ops)} OKB`, `${p.termDays[0]} 天 · 费用 ${pctBps(p.feeBps[0])} + ${native(ops)} OKB`) : t(`${p.termDays[0]} days · fee ${pctBps(p.feeBps[0])}`, `${p.termDays[0]} 天 · 费用 ${pctBps(p.feeBps[0])}`)}</span></div>`;
     actions = html`<a class="btn btn-p" href="${link}">${t('Borrow', '借款')}</a>`;
   } else {
-    body = html`<p class="mut">${rigWhy(r)}</p>`;
+    body = html`<p class="mut">${whyText(c, r)}</p>`;
     if (s.kind === 'not-synced') actions = harvestLink();
-    if (s.kind === 'not-screened') actions = html`<a class="btn btn-s" href="${link}/screen">${t('Ask for a screen', '申请筛查')}</a>`;
+    const line = lineOf(c, r);
+    if (line) {
+      actions = lineAction(c, r, line);
+      if (line.kind === 'fail' || line.kind === 'revoked') cls = ' off';
+    }
   }
   return html`<article class="rcard${cls}"><a class="rcard-h" href="${link}"><b class="mono">#${r.id}</b>${chipFor(c, r)}</a><div class="rcard-m pi">${rigMeta(r)}</div><div class="rcard-b">${body}</div>${actions === EMPTY ? EMPTY : html`<div class="rcard-f">${actions}</div>`}</article>`;
 }
@@ -231,7 +244,7 @@ export function rigsPage(c: Ctx): Html {
     ${claimBanners(c)}${join(snap.agents.map((a) => releaseEntries(c, a)))}
     <div class="rgrid">${join(mine.map((r) => rigCard(c, r)))}</div>
     <div class="row-wrap g8-14 ai-c"><a class="btn btn-s" href="${c.link('/rigs/group')}">${t('Borrow against several rigs in one loan', '多台矿机合并为一笔借款')}</a><span class="mut t12">${t('Advanced. Grouped rigs are seized together if one of them is impaired.', '进阶功能。合并后只要一台受损，全组矿机都可能被没收。')}</span></div>
-    <div class="rg3">${elig()}${alerts(c)}${help()}</div>`;
+    <div class="rg3">${elig(c)}${alerts(c)}${help()}</div>`;
 }
 
 /* ───────── the rig page ───────── */
@@ -267,15 +280,19 @@ export function rigPage(c: Ctx, id: number): Html {
     const extra = s.kind === 'in-agent' ? html`<section class="v2-card"><div class="v2-card-h"><h2>${t('Not borrowing now?', '暂时不借款？')}</h2></div><div class="v2-card-b row-wrap g10 ai-c">${takeBack(c, r, undefined)}<span class="mut t12">${t('Takes the voucher out of the agent and back to your wallet. You can move it in again later.', '把凭证从代理中取回到您的钱包，之后可以再次转入。')}</span></div></section>` : EMPTY;
     content = html`${poolNotice(c)}${flow(c, rigInfo(c, r))}${extra}`;
   } else if (s.kind === 'loose') {
-    content = html`${cl('w', html`<b>${t('This voucher is not collateral.', '这张凭证不计入担保。')}</b> ${rigWhy2(r)}`, html`${s.agentClosed ? EMPTY : registerButton(c, r)}${act(c, { a: 'take-back', v: r.id, kind: 's', size: 'sm', needs: ['rigs'] }, t('Take back', '取回凭证'))}`)}<div class="rg3">${elig()}${side}</div>`;
+    content = html`${cl('w', html`<b>${t('This voucher is not collateral.', '这张凭证不计入担保。')}</b> ${rigWhy2(r)}`, html`${s.agentClosed ? EMPTY : registerButton(c, r)}${act(c, { a: 'take-back', v: r.id, kind: 's', size: 'sm', needs: ['rigs'] }, t('Take back', '取回凭证'))}`)}<div class="rg3">${elig(c)}${side}</div>`;
   } else if (s.kind === 'seized') {
-    content = html`${cl('n', html`<b>${t('Seized.', '已被没收。')}</b> ${t('The voucher now belongs to the pool and mines for lenders. The details of the loan could not be read right now.', '凭证现归资金池所有，为出借人挖矿。暂时无法读取该贷款的详细信息。')}`)}<div class="rg3">${elig()}${side}</div>`;
+    content = html`${cl('n', html`<b>${t('Seized.', '已被没收。')}</b> ${t('The voucher now belongs to the pool and mines for lenders. The details of the loan could not be read right now.', '凭证现归资金池所有，为出借人挖矿。暂时无法读取该贷款的详细信息。')}`)}<div class="rg3">${elig(c)}${side}</div>`;
   } else if (s.kind === 'stuck') {
-    content = html`${cl('n', html`<b>${t('Moving to the pool.', '正在转入资金池。')}</b> ${t('This agent was closed by a seize. The voucher is moving to the pool; anyone can finish the move.', '该矿机代理已因没收而关闭，凭证正在转入资金池，任何人都可以完成转移。')}`)}<div class="rg3">${elig()}${side}</div>`;
+    content = html`${cl('n', html`<b>${t('Moving to the pool.', '正在转入资金池。')}</b> ${t('This agent was closed by a seize. The voucher is moving to the pool; anyone can finish the move.', '该矿机代理已因没收而关闭，凭证正在转入资金池，任何人都可以完成转移。')}`)}<div class="rg3">${elig(c)}${side}</div>`;
   } else {
-    const kind = s.kind === 'not-screened' || s.kind === 'screen-pending' || s.kind === 'not-synced' ? 'w' : 'n';
-    const cta = s.kind === 'not-screened' ? html`<a class="btn btn-p btn-sm" href="${c.link(`/rigs/${id}/screen`)}">${t('Ask for a screen', '申请筛查')}</a>` : s.kind === 'not-synced' ? harvestLink() : null;
-    content = html`${cl(kind, html`<b>${t('This rig cannot borrow yet.', '这台矿机暂时无法借款。')}</b> ${rigWhy(r)}`, cta)}<div class="rg3">${elig()}${side}</div>`;
+    const line = lineOf(c, r);
+    const final = line?.kind === 'fail' || line?.kind === 'revoked';
+    const kind = final ? 'bad' : line && s.kind !== 'too-new' ? lineKind(line) : s.kind === 'not-screened' || s.kind === 'screen-pending' || s.kind === 'not-synced' ? 'w' : 'n';
+    const own = line ? lineAction(c, r, line, undefined) : EMPTY;
+    const cta = own !== EMPTY ? own : s.kind === 'not-synced' ? harvestLink() : null;
+    const lead = final ? t('This rig cannot borrow.', '这台矿机无法借款。') : t('This rig cannot borrow yet.', '这台矿机暂时无法借款。');
+    content = html`${cl(kind, html`<b>${lead}</b> ${whyText(c, r)}`, cta)}<div class="rg3">${elig(c)}${side}</div>`;
   }
   const released = c.ui.flash?.kind === 'released' && c.ui.flash.rigId === id ? c.ui.flash.agent : null;
   return html`${head}${flashBanner(c, id)}${content}${join(snap.agents.filter((a) => a.collateral.includes(id) || a.address.toLowerCase() === released?.toLowerCase()).map((a) => releaseEntries(c, a)))}`;
@@ -296,8 +313,8 @@ function rigRow(c: Ctx, r: RigView): Html {
   const on = c.ui.sel.includes(r.id);
   const type = c.ui.group ? 'checkbox' : 'radio';
   const pend = r.mined !== null && r.mined > 0n ? html` · ${t(`${bem4(r.mined)} BEM not harvested`, `待领取 ${bem4(r.mined)} BEM`)}` : EMPTY;
-  const ask = r.state.kind === 'not-screened' && r.state.why === 'none' ? html`<a class="btn btn-s btn-sm" href="${c.link(`/rigs/${r.id}/screen`)}">${t('Ask for a screen', '申请筛查')}</a>` : EMPTY;
-  return html`<label class="rig${on ? ' on' : ''}${can ? '' : ' dis'}"><input type="${type}" name="rig" data-pick="${r.id}"${on ? html` checked` : EMPTY}${can ? EMPTY : html` disabled`} aria-label="${t('Use rig', '选择矿机')} #${r.id}"><span class="rig-m"><b class="mono">#${r.id}</b><small>${rigMeta(r)}${pend}</small></span><span class="rig-c">${chipFor(c, r)}${ask}</span></label>`;
+  // registering happens on the rig's own page (SPEC-PHASE5-REGISTER §7.1): the row shows the chip only
+  return html`<label class="rig${on ? ' on' : ''}${can ? '' : ' dis'}"><input type="${type}" name="rig" data-pick="${r.id}"${on ? html` checked` : EMPTY}${can ? EMPTY : html` disabled`} aria-label="${t('Use rig', '选择矿机')} #${r.id}"><span class="rig-m"><b class="mono">#${r.id}</b><small>${rigMeta(r)}${pend}</small></span><span class="rig-c">${chipFor(c, r)}</span></label>`;
 }
 
 export function groupPage(c: Ctx): Html {

@@ -12,8 +12,11 @@ import { log, redact, registerSecrets } from "./log.js";
 import { PushLimiter } from "./logic/pushLimits.js";
 import { PushService } from "./push.js";
 import { checkStack, readPolicy } from "./reads.js";
+import { runInWorker } from "./screen/runner.js";
+import { ScreenService, XLayerScreenChain } from "./screens.js";
 import { loadState, saveState } from "./state.js";
 import { Sender } from "./tx.js";
+import { dirname, join } from "node:path";
 
 const CYCLE_MS = 60_000;
 
@@ -57,6 +60,19 @@ async function main(): Promise<void> {
     (kind, text) => void alerts.send(kind, text),
     undefined, persist, state.custodyAlerts,
   );
+  // "Register to borrow" (SPEC-PHASE5-REGISTER §6): read-only screen runs in a worker; artifacts next to the state file
+  const screens = new ScreenService({
+    cfg: cfg.screen,
+    d: deployment,
+    state: keeper.state.screen,
+    dir: join(dirname(cfg.statePath), "screen-artifacts"),
+    chain: deployment ? new XLayerScreenChain(clients, deployment) : null,
+    run: (input) => runInWorker(input),
+    alert: (kind, text, always) => void alerts.send(kind, text, always),
+    isFrozen: () => keeper.frozen,
+    persist,
+  });
+  await screens.init();
   const server = startHttp(
     cfg.port,
     cfg.appOrigins,
@@ -73,6 +89,8 @@ async function main(): Promise<void> {
       ...deploymentStatus(deployment, policy),
     }),
     keeper.publicData && deployment && policy ? withDeploymentStatus(keeper.publicData, deployment, policy) : undefined,
+    undefined,
+    screens,
   );
 
   log("info", "keeper started", { mode: cfg.mode, keeper: clients.account.address, deployed: deployment !== null });
@@ -93,6 +111,7 @@ async function main(): Promise<void> {
     const started = Date.now();
     await keeper.cycle();
     await push.checkDeliveries().catch((e) => log("error", "delivery check failed", { error: String(e) }));
+    await screens.tick().catch((e) => log("error", "screen tick failed", { error: redact(String(e)) }));
     try {
       saveState(cfg.statePath, keeper.state);
     } catch (e) {

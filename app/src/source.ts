@@ -1,5 +1,5 @@
 import type { AppError } from './chain/errors';
-import type { Address, PrincipalQuote, Sec, Snapshot, TermIndex } from './model';
+import type { Address, PrincipalQuote, ScreenRecord, Sec, Snapshot, TermIndex } from './model';
 
 /**
  * The two seams between the screens and the world.
@@ -7,8 +7,8 @@ import type { Address, PrincipalQuote, Sec, Snapshot, TermIndex } from './model'
  */
 
 export interface DataSource {
-  /** The current read. With `view` set, the read is for that address and the wallet is read-only. */
-  snapshot(view: Address | null, showTransactions?: boolean): Snapshot;
+  /** The current read. With `view` set, the read is for that address and the wallet is read-only. `screens`: the owner page is open (SPEC-PHASE5-REGISTER §8). */
+  snapshot(view: Address | null, showTransactions?: boolean, screens?: boolean): Snapshot;
   quoteFor?(agent: Address, term: TermIndex, principal: bigint): Promise<PrincipalQuote | null>;
   /** X Layer time in seconds, advancing between reads. Never the browser clock alone. */
   now(): Sec;
@@ -105,5 +105,10 @@ export interface Actions {
   approveSupply(amount: bigint): Promise<ActionResult>;
   supply(amount: bigint): Promise<ActionResult>;
   withdraw(amount: bigint, max: boolean): Promise<ActionResult>;
+
+  /** "Register to borrow": one `POST /v1/register` to the keeper. No transaction, no wallet prompt (SPEC-PHASE5-REGISTER §7.1). */
+  registerRig(id: number): Promise<ActionResult>;
+  /** The owner page's Sign: `RigScreen.recordPass` from the owner's wallet, after every check of §8.3. */
+  recordPass(id: number, record: ScreenRecord): Promise<ActionResult>;
 }
 

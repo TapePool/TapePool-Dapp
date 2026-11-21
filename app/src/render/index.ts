@@ -4,6 +4,7 @@ import { dashboard } from './dashboard';
 import { markets } from './markets';
 import { repayModal, screenModal, supplyModal } from './modals';
 import { poolPage } from './pool';
+import { ownerPage } from './owner';
 import { groupPage, rigPage, rigsPage } from './rigs';
 import { bootCard, footer, gate, header, notFound, pageNotices } from './shell';
 import { resetIds, type Ctx } from './ui';
@@ -19,7 +20,7 @@ export interface Rendered {
   title: string;
 }
 
-const NAV: Record<string, string> = { dash: '', markets: 'markets', pool: 'markets', rigs: 'rigs', group: 'rigs', rig: 'rigs', notfound: '', trace: 'tape' };
+const NAV: Record<string, string> = { dash: '', markets: 'markets', pool: 'markets', rigs: 'rigs', group: 'rigs', rig: 'rigs', notfound: '', trace: 'tape', owner: '' };
 
 /** Pages that show the connected account's data. Markets and the pool page read without a wallet. */
 const NEEDS_WALLET = new Set(['dash', 'rigs', 'group', 'rig']);
@@ -55,6 +56,10 @@ export function renderApp(c: Ctx): Rendered {
     case 'rig':
       title = `${t('Rig', '矿机')} #${r.id ?? ''}`;
       content = gated ? gate(c, t('Rigs', '矿机')) : rigPage(c, r.id ?? 0);
+      break;
+    case 'owner':
+      title = t('Screen passes', '筛查通过记录');
+      content = ownerPage(c);
       break;
     case 'trace':
       title = 'Tape';

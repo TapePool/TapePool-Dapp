@@ -168,6 +168,64 @@ export interface KeeperView {
   selfPushBnb: bigint | null;
 }
 
+/* ───────── "Register to borrow" (SPEC-PHASE5-REGISTER) ───────── */
+
+export type ScreenStatus = 'queued' | 'checking' | 'pass' | 'fail' | 'error' | 'recorded' | 'revoked';
+
+/** Codes of a `fail` record (the rig itself cannot borrow) and of an `error` record (the run could not decide). */
+export type ScreenFailCode = 'no-voucher' | 'voucher-mismatch' | 'processor' | 'not-mining' | 'task' | 'circuit' | 'wrong-output' | 'differs' | 'counterexample' | 'too-wide';
+export type ScreenErrorCode = 'transient' | 'verify' | 'check';
+
+/** What the keeper says it checked. Data: the owner page re-derives everything it signs from the artifact's own bytes. */
+export interface ScreenArtifact {
+  file: string;
+  hash: Hex;
+  verdict: 'PASS' | 'FAIL';
+  circuits: Address | null;
+  circuitId: bigint | null;
+  taskId: bigint | null;
+  bscBlock: bigint | null;
+  /** Reproduced byte for byte on the keeper's second providers. */
+  verified: boolean;
+}
+
+/** One registration, as `GET /v1/screens` reports it (§6.2). */
+export interface ScreenRecord {
+  rigId: number;
+  status: ScreenStatus;
+  requestedAt: Sec;
+  updatedAt: Sec;
+  attempts: number;
+  /** `error` only: from when Register is accepted again. */
+  retryAt: Sec | null;
+  code: ScreenFailCode | ScreenErrorCode | null;
+  /** The screen's own reasons: untrusted text, always escaped. */
+  reasons: string[];
+  artifact: ScreenArtifact | null;
+  /** The provider (never a URL) that served each side of the last run, as the keeper reports it; null when absent. */
+  hosts: { checkBsc: string; checkXlayer: string; verifyBsc: string | null; verifyXlayer: string | null } | null;
+}
+
+/** The keeper's registration list. `open` false: registration is closed and the app shows the static note. */
+export interface ScreensView {
+  open: boolean;
+  /** No run starts (an upgrade is pending, or a protocol change is under review); queued records wait. */
+  paused: boolean;
+  records: Record<string, ScreenRecord>;
+}
+
+/** The owner page's own chain reads (§8). Null fields could not be read. */
+export interface OwnerScreensView {
+  /** `pool.owner()`. */
+  owner: Address | null;
+  /** `RigScreen.pool()` is the address book's pool. */
+  registryOk: boolean | null;
+  /** `passOf` per rig id of the keeper's records; null when that read failed. */
+  chain: Record<string, { pass: ScreenPass | null; suspended: boolean } | null>;
+  /** The keeper the artifacts download from (the app's own `KEEPER_URL`), for the Download link. */
+  keeperUrl?: string | null;
+}
+
 /* ───────── rigs (SPEC-PHASE5-APP §5.2) ───────── */
 
 export type RigPlace =
@@ -371,7 +429,9 @@ export type ActionId =
   | 'claim'
   | 'approve-supply'
   | 'supply'
-  | 'withdraw';
+  | 'withdraw'
+  /** `RigScreen.recordPass`, from the owner page only (SPEC-PHASE5-REGISTER §8.3). */
+  | 'record-pass';
 
 /** What the wallet is about to ask the user to confirm: the contract, the function and the value (SPEC-PHASE5-APP §6.0 rule 4). */
 export interface Ask {
@@ -497,6 +557,15 @@ export interface Snapshot {
   entry?: Record<string, AppError | null>;
   /** BEM mined before a loan: the bridge fee, the harvest records of this wallet and what a harvest needs (SPEC-PHASE5-PRELOAN). */
   harvest: HarvestView;
+  /**
+   * The keeper's registrations (SPEC-PHASE5-REGISTER §7.2): null when the keeper could not be asked or gave no list, absent when
+   * nothing needed it. Either way a rig without a pass falls back to the static note.
+   */
+  screens?: ScreensView | null;
+  /** `RigScreen.DELAY()` in seconds; null or absent when unread, and the copy then names no number. */
+  screenDelay?: Sec | null;
+  /** The owner page's reads; absent off that page. */
+  ownerScreens?: OwnerScreensView | null;
   pending: PendingTx | null;
   stale: Partial<Record<Section, true>>;
 }

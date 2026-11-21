@@ -86,7 +86,8 @@ Referrer-Policy: no-referrer
 - `Cache-Control: public, max-age=31536000, immutable` for `/assets/*` (their names carry a content hash) and `no-cache` for `index.html`.
 - **Keeper CORS.** The keeper answers only the origins in its `APP_ORIGINS` (comma-separated). Add the origin of every place the
   app is served from: the HTTPS host, and for DeWEB both gateway origins, `https://1-2-382.tapekit.org` and its compatibility
-  tier `https://1-2-382-open.tapekit.org`. A browser sends the origin with no path.
+  tier `https://1-2-382-open.tapekit.org`. A browser sends the origin with no path. The same origins post "Register to borrow"
+  (`POST /v1/register`, with a preflight) and read `GET /v1/screens` and the artifacts for the owner page `#/app/owner`.
 
 ## The mainnet smoke test
 

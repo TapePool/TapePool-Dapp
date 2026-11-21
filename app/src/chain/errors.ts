@@ -166,6 +166,39 @@ export const REVERTS: Record<string, Row> = {
   ERC4626ExceededMaxRedeem: aboveMax,
   LZ_InsufficientFee: row('The BSC fee changed. Try again.', 'BSC 上的费用已变化，请重试。'),
   BadBatch: row('Too many rigs for one push.', '一次推送的矿机过多。'),
+  // RigScreen.recordPass, from the owner page (SPEC-PHASE5-REGISTER §10)
+  NotOwner: row("Only the pool owner's wallet can record a screen pass.", '只有资金池所有者的钱包才能记录筛查通过结果。'),
+  BadPass: row('The pass is malformed, so nothing was recorded.', '筛查通过记录的格式有误，因此未作记录。'),
+};
+
+const registerLater = row('The keeper cannot take this now. Try again in a few minutes.', 'keeper 暂时无法处理，请几分钟后重试。');
+const voucherMissing = row('This voucher could not be found. Refresh the page.', '找不到这张凭证，请刷新页面。');
+
+/** Answers of `POST /v1/register` as the keeper spells them (SPEC-PHASE5-REGISTER §6.2, §10); the push table covers the rest. */
+export const REGISTER: Record<string, Row> = {
+  queued: row('Registered. The keeper checks this rig now.', '已提交申请，keeper 正在检查这台矿机。'),
+  known: row('This rig is already registered.', '这台矿机已提交过申请。'),
+  recorded: row('This rig already has a screen pass on-chain.', '这台矿机在链上已有筛查通过记录。'),
+  'registration is not open': row('Registration is not open right now. The TapePool team screens new rigs.', '目前暂未开放申请，TapePool 团队会为新矿机做筛查。'),
+  'bad rig id': voucherMissing,
+  'no voucher': voucherMissing,
+  'voucher not synced': row('The voucher has not synced with the rig yet. Harvest once on tapeout.net to sync it.', '凭证尚未与矿机同步。请先在 tapeout.net 上领取一次收益以完成同步。'),
+  'screen suspended': row("This rig's screen pass is suspended. The TapePool team must review it.", '这台矿机的筛查通过记录已被暂停，需由 TapePool 团队审查。'),
+  'chain read failed, try again shortly': registerLater,
+  'queue full, try again later': registerLater,
+  unreachable: registerLater,
+};
+
+/** Why the owner page did not send `recordPass` (SPEC-PHASE5-REGISTER §8.3). Nothing was sent in any of these. */
+export type ScreenWhy = 'not-owner' | 'artifact' | 'download' | 'recorded' | 'mismatch' | 'not-ready';
+
+export const SCREEN: Record<ScreenWhy, Row> = {
+  'not-owner': REVERTS.NotOwner as Row,
+  artifact: row('The artifact does not match what the keeper reported, so nothing was sent. Tell the team.', '筛查报告与 keeper 所报内容不符，因此未发送任何交易，请告知团队。'),
+  download: row('The artifact could not be downloaded, so nothing was sent. Try again.', '无法下载筛查报告，因此未发送任何交易，请重试。'),
+  recorded: REGISTER.recorded as Row,
+  mismatch: row('The rig on-chain no longer matches the artifact, so nothing was sent.', '链上的矿机已与筛查报告不符，因此未发送任何交易。'),
+  'not-ready': row('This rig has no verified screen pass to record.', '这台矿机没有可记录的、已验证的筛查通过结果。'),
 };
 
 /** `PolicyDenied(reason)` shows the line of its reason code. */
@@ -300,6 +333,10 @@ export type AppError =
   | { kind: 'quote'; reason: number; params?: MsgParams }
   | { kind: 'revert'; name: string; params?: MsgParams; reason?: number }
   | { kind: 'keeper'; reason: string }
+  /** `POST /v1/register` refused, or could not be asked (SPEC-PHASE5-REGISTER §10). */
+  | { kind: 'register'; reason: string }
+  /** The owner page did not send `recordPass` (§8.3). */
+  | { kind: 'screen'; why: ScreenWhy }
   | { kind: 'wallet-rejected' }
   /** The wallet cannot move to X Layer (it refused the switch and the add). `details` is its own text. */
   | { kind: 'wallet-no-xlayer'; details: string }
@@ -330,6 +367,10 @@ export function errorText(e: AppError): string {
     }
     case 'keeper':
       return pick(KEEPER[e.reason] ?? UNKNOWN);
+    case 'register':
+      return pick(REGISTER[e.reason] ?? KEEPER[e.reason] ?? UNKNOWN);
+    case 'screen':
+      return pick(SCREEN[e.why]);
     case 'wallet-rejected':
       return pick(WALLET_REJECTED);
     case 'wallet-no-xlayer':
@@ -355,7 +396,7 @@ export function errorText(e: AppError): string {
 
 /** The raw text to show under "Details" for errors we do not know. */
 export const errorDetails = (e: AppError): string | null =>
-  e.kind === 'unknown' ? e.details : e.kind === 'wallet-no-xlayer' ? e.details || null : e.kind === 'keeper' && !(e.reason in KEEPER) ? e.reason : e.kind === 'entry' ? e.check : e.kind === 'tx-failed' ? e.hash : null;
+  e.kind === 'unknown' ? e.details : e.kind === 'wallet-no-xlayer' ? e.details || null : e.kind === 'keeper' && !(e.reason in KEEPER) ? e.reason : e.kind === 'register' && !(e.reason in REGISTER) && !(e.reason in KEEPER) ? e.reason : e.kind === 'entry' ? e.check : e.kind === 'tx-failed' ? e.hash : null;
 
 
 /** The binding code of TapePool.lendLimit; while the feed settles after a re-enable, binding 5 says so (RC3-02). */

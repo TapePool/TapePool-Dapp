@@ -130,6 +130,7 @@ export const screenAbi = [...contractErrors, ...parseAbi([
   "function suspendPass(uint256 rigId)",
   "function passOf(uint256 rigId) view returns (Pass pass, bool isSuspended)",
   "function isEffective(uint256 rigId, address circuits, uint64 circuitId, uint32 taskId) view returns (bool)",
+  "function DELAY() view returns (uint256)",
   "event ScreenPassAdded(uint256 indexed rigId, address circuits, uint64 circuitId, uint32 taskId, bytes32 artifactHash, uint64 effectiveAt)",
   "event PassSuspensionLifted(uint256 indexed rigId)",
   "event PassSuspended(uint256 indexed rigId, address indexed by)",

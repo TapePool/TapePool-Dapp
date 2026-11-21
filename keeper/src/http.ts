@@ -1,6 +1,7 @@
-// HTTP surface: POST /v1/push (SPEC-PHASE3-KEEPER §5.2), GET /healthz, and the app's two read-only routes
-// GET /v1/stats and GET /v1/position/<address> (SPEC-PHASE5-APP §8). Nothing else. A failing request can
-// never stop the keeper loop.
+// HTTP surface: POST /v1/push (SPEC-PHASE3-KEEPER §5.2), GET /healthz, the app's two read-only routes
+// GET /v1/stats and GET /v1/position/<address> (SPEC-PHASE5-APP §8), and "Register to borrow": POST /v1/register,
+// GET /v1/screens and GET /v1/screens/<rigId>/artifact (SPEC-PHASE5-REGISTER §6.2). Nothing else. A failing
+// request can never stop the keeper loop.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isAddress } from "viem";
 import { log } from "./log.js";
@@ -27,6 +28,22 @@ function readRoute(url: string): { kind: "stats" } | { kind: "position"; address
   return m ? { kind: "position", address: m[1] ?? "" } : null;
 }
 
+/** What the HTTP layer needs from `ScreenService` (SPEC-PHASE5-REGISTER §6.2). */
+export interface ScreensApi {
+  request(rigId: unknown, ip: string): Promise<unknown>;
+  list(): unknown;
+  artifact(rigId: string): { bytes: Buffer; file: string } | null;
+}
+
+/** `GET /v1/screens` and `GET /v1/screens/<rigId>/artifact`; a query string is ignored. */
+function screenRoute(url: string): { kind: "list" } | { kind: "artifact"; rigId: string } | null {
+  const q = url.indexOf("?");
+  const path = q < 0 ? url : url.slice(0, q);
+  if (path === "/v1/screens") return { kind: "list" };
+  const m = /^\/v1\/screens\/([^/]*)\/artifact$/.exec(path);
+  return m ? { kind: "artifact", rigId: m[1] ?? "" } : null;
+}
+
 function send(res: ServerResponse, status: number, body: unknown, origin: string | null, extra: Record<string, string> = {}): void {
   const headers: Record<string, string> = { "content-type": "application/json", ...extra };
   if (origin) {
@@ -44,13 +61,14 @@ export function startHttp(
   health: () => Record<string, unknown>,
   data?: PublicDataApi,
   readLimiter: ReadLimiter = new ReadLimiter(),
+  screens?: ScreensApi,
 ): Server {
   const server = createServer((req, res) => {
     const origin = typeof req.headers.origin === "string" && appOrigins.includes(req.headers.origin) ? req.headers.origin : null;
     void (async () => {
       try {
         if (req.method === "GET" && req.url === "/healthz") return send(res, 200, health(), origin);
-        if (req.method === "OPTIONS" && req.url === "/v1/push") {
+        if (req.method === "OPTIONS" && (req.url === "/v1/push" || (screens && req.url === "/v1/register"))) {
           res.writeHead(204, origin ? {
             "access-control-allow-origin": origin,
             "access-control-allow-methods": "POST",
@@ -73,7 +91,29 @@ export function startHttp(
           const a = data.position(route.address);
           return send(res, a.status, a.body, origin);
         }
-        if (req.method !== "POST" || req.url !== "/v1/push") return send(res, 404, { error: "not found" }, origin);
+        // SPEC-PHASE5-REGISTER §6.2: the screen list and the artifacts, from memory and the volume, behind the same read limiter
+        const sroute = req.method === "GET" && screens ? screenRoute(req.url ?? "") : null;
+        if (sroute && screens) {
+          const verdict = readLimiter.admit(clientIp(req));
+          if (!verdict.ok) return send(res, 429, { error: "too many requests" }, origin, { "retry-after": String(verdict.retryAfter) });
+          if (sroute.kind === "list") return send(res, 200, screens.list(), origin);
+          const a = screens.artifact(sroute.rigId);
+          if (!a) return send(res, 404, { error: "not found" }, origin);
+          const headers: Record<string, string> = {
+            "content-type": "application/json",
+            "content-disposition": `attachment; filename="${a.file}"`,
+            "cache-control": "no-cache",
+          };
+          if (origin) {
+            headers["access-control-allow-origin"] = origin;
+            headers["vary"] = "origin";
+          }
+          res.writeHead(200, headers);
+          return res.end(a.bytes);
+        }
+        const isPush = req.method === "POST" && req.url === "/v1/push";
+        const isRegister = req.method === "POST" && req.url === "/v1/register" && screens !== undefined;
+        if (!isPush && !isRegister) return send(res, 404, { error: "not found" }, origin);
 
         let size = 0;
         const chunks: Buffer[] = [];
@@ -87,6 +127,10 @@ export function startHttp(
           body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
         } catch {
           return send(res, 400, { error: "invalid JSON" }, origin);
+        }
+        if (isRegister && screens) {
+          const rigId = typeof body === "object" && body !== null ? (body as { rigId?: unknown }).rigId : undefined;
+          return send(res, 200, await screens.request(rigId, clientIp(req)), origin);
         }
         const agent = typeof body === "object" && body !== null ? (body as { agent?: unknown }).agent : undefined;
         const decision = await push.request(agent, clientIp(req));

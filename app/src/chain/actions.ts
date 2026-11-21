@@ -2,17 +2,17 @@ import { decodeEventLog, decodeFunctionResult, encodeFunctionData, getAddress, t
 import type { AppConfig } from '../config';
 import { BOND, BRIDGE_FEE_BPS_MAX, MAX_COLLATERAL, MAX_HARVEST_VALUE } from '../constants';
 import { t } from '../i18n';
-import { bem4, bemTrim, fmtUnits, native, shortAddr } from '../logic/format';
+import { bem4, bemTrim, fd, fmtUnits, native, shortAddr } from '../logic/format';
 import { timely } from '../logic/borrow';
 import { blocksHarvest, gateOpen, isStuck, observeDrop, promptingRecord } from '../logic/gates';
 import { collectable, landed, minedR, shareRequired } from '../logic/harvest';
 import type { LoanRaw } from '../logic/loan';
-import type { Address, Ask, Hex, PrincipalQuote } from '../model';
+import type { Address, Ask, Hex, PrincipalQuote, ScreenRecord } from '../model';
 import type { ActionResult, Actions, BorrowArgs, MoveOptions } from '../source';
-import { agentFactoryAbi, bscVaultAbi, erc20Abi, multicall3Abi, rigAgentAbi, tapePoolAbi, voucherAbi, reporterAbi } from './abi';
+import { agentFactoryAbi, bscVaultAbi, erc20Abi, multicall3Abi, rigAgentAbi, rigScreenAbi, tapePoolAbi, voucherAbi, reporterAbi } from './abi';
 import { readBsc, type KeyCache } from './bsc';
 import { checkAgent, checkWiring, type CheckEnv } from './checks';
-import { KEEPER_SELF_PUSH, type AppError, type HarvestWhy, type MsgParams } from './errors';
+import { errorText, KEEPER_SELF_PUSH, type AppError, type HarvestWhy, type MsgParams } from './errors';
 import { reportTimes, requestPush, waitForReports, WAIT_POLL_MS, WAIT_REPORT_MS, type WaitDeps } from './feedWait';
 import { GateStore } from './gates';
 import { harvestedAmounts, readContracts, readPayees } from './harvest';
@@ -24,6 +24,8 @@ import type { Reader, ReceiptInfo } from './reader';
 import { TxRunner, type ActionHost, type TxResult } from './tx';
 import type { WalletPort, WalletResult } from './wallet';
 import { memoryStore } from '../logic/history';
+import { passArgsFrom } from '../logic/screen';
+import { fetchArtifact, requestRegister } from './keeper';
 
 /**
  * The buttons that reach the wallet (SPEC-PHASE5-APP §6). Every write goes through `TxRunner`: right chain, simulate
@@ -862,6 +864,87 @@ export class ChainActions implements Actions {
     const r = await this.tx.run({ chain: 'xlayer', to: agent, data: encodeFunctionData({ abi: rigAgentAbi, functionName: 'claimLate' }), value: 0n, action: 'claim', ask: this.ask('RigAgent', agent, 'claimLate()') });
     if (!r.ok) return this.failed(r);
     return { ok: true, notice: () => t(`${bem4(held)} BEM sent to your wallet.`, `${bem4(held)} BEM 已转入您的钱包。`) };
+  }
+
+  /* ───────── "Register to borrow" and the owner's Sign (SPEC-PHASE5-REGISTER §7, §8) ───────── */
+
+  /** One `POST /v1/register`. No transaction, no wallet prompt: the keeper screens the rig, read-only. */
+  async registerRig(id: number): Promise<ActionResult> {
+    const answer = await requestRegister(this.cfg.keeperUrl, id, this.doFetch);
+    if (answer.status === 'unreachable') return fail({ kind: 'register', reason: 'unreachable' });
+    if (answer.status === 'refused') return fail({ kind: 'register', reason: answer.reason });
+    if (answer.status === 'recorded') {
+      await this.host.refresh();
+      return { ok: true, notice: () => errorText({ kind: 'register', reason: 'recorded' }) };
+    }
+    this.host.noteScreen?.(answer.record);
+    const status = answer.status;
+    return { ok: true, notice: () => errorText({ kind: 'register', reason: status }) };
+  }
+
+  /**
+   * §8.3, fail closed at every step: the connected account is `pool.owner()` now; RigScreen belongs to this pool; no pass is
+   * recorded yet; the artifact's own bytes hash to what the keeper listed, are canonical and say PASS under option A for this
+   * rig; the voucher and BSC still describe that rig, active. Only then `recordPass`, with arguments taken from the bytes.
+   */
+  async recordPass(id: number, record: ScreenRecord): Promise<ActionResult> {
+    const me = this.account();
+    if (!me) return fail({ kind: 'unknown', details: 'The wallet is not connected.' });
+    if (record.rigId !== id || record.status !== 'pass' || !record.artifact?.verified) return fail({ kind: 'screen', why: 'not-ready' });
+    const { book } = this;
+    const rid = BigInt(id);
+    let vCircuits: Address;
+    let vCircuitId: bigint;
+    try {
+      const [owner, registry, rig, pass] = await multicall(this.x, book.multicall3, [
+        call<Address>(book.pool, tapePoolAbi, 'owner'),
+        call<Address>(book.screen, rigScreenAbi, 'pool'),
+        call<readonly [Address, bigint, bigint, bigint]>(book.voucher, voucherAbi, 'rigs', [rid]),
+        call<readonly [{ effectiveAt: bigint }, boolean]>(book.screen, rigScreenAbi, 'passOf', [rid]),
+      ] as const);
+      if (!owner.ok || !registry.ok || !rig.ok || !pass.ok) return fail({ kind: 'unknown', details: 'A read of the owner, RigScreen or the voucher failed.' });
+      if (owner.value.toLowerCase() !== me.toLowerCase()) return fail({ kind: 'screen', why: 'not-owner' });
+      if (registry.value.toLowerCase() !== book.pool.toLowerCase()) return fail({ kind: 'entry', check: 'RigScreen.pool' });
+      if (pass.value[0].effectiveAt !== 0n) return fail({ kind: 'screen', why: 'recorded' });
+      [vCircuits, , vCircuitId] = rig.value;
+    } catch {
+      return fail({ kind: 'unknown', details: 'X Layer could not be read.' });
+    }
+    const bytes = await fetchArtifact(this.cfg.keeperUrl, id, this.doFetch);
+    if (!bytes) return fail({ kind: 'screen', why: 'download' });
+    const args = passArgsFrom(bytes, id, record);
+    if (!args) return fail({ kind: 'screen', why: 'artifact' });
+    if (vCircuits.toLowerCase() !== args.circuits.toLowerCase() || vCircuitId !== args.circuitId) return fail({ kind: 'screen', why: 'mismatch' });
+    let onBsc;
+    try {
+      onBsc = (await readBsc(this.b, book, [id], this.keys)).facts.get(id);
+    } catch {
+      return fail({ kind: 'unknown', details: 'BSC could not be read.' });
+    }
+    if (!onBsc || onBsc.status !== 1 || onBsc.circuits.toLowerCase() !== args.circuits.toLowerCase() || onBsc.circuitId !== args.circuitId || onBsc.taskId !== BigInt(args.taskId)) {
+      return fail({ kind: 'screen', why: 'mismatch' });
+    }
+    const r = await this.tx.run({
+      chain: 'xlayer',
+      to: book.screen,
+      data: encodeFunctionData({ abi: rigScreenAbi, functionName: 'recordPass', args: [args.rigId, args.circuits, args.circuitId, args.taskId, args.artifactHash] }),
+      value: 0n,
+      action: 'record-pass',
+      ask: this.ask('RigScreen', book.screen, `recordPass(#${id}, task ${args.taskId}, ${args.artifactHash.slice(0, 10)}…)`),
+    });
+    if (!r.ok) return this.failed(r);
+    let at: bigint | null = null;
+    try {
+      const [p] = await multicall(this.x, book.multicall3, [call<readonly [{ effectiveAt: bigint }, boolean]>(book.screen, rigScreenAbi, 'passOf', [rid])] as const);
+      at = p.ok ? p.value[0].effectiveAt : null;
+    } catch {
+      /* the toast then names no time */
+    }
+    const when = at && at > 0n ? Number(at) : null;
+    return {
+      ok: true,
+      notice: () => (when === null ? t(`Pass recorded for #${id}.`, `#${id} 的筛查通过结果已记录。`) : t(`Pass recorded for #${id}. It counts from ${fd(when, true)}.`, `#${id} 的筛查通过结果已记录，${fd(when, true)} 起生效。`)),
+    };
   }
 
   /* ───────── supply and withdraw ───────── */

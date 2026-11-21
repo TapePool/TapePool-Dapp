@@ -1,7 +1,7 @@
 import { isAddress } from 'viem/utils';
 import type { Address } from './model';
 
-export type Page = 'dash' | 'markets' | 'pool' | 'rigs' | 'group' | 'rig' | 'notfound' | 'trace';
+export type Page = 'dash' | 'markets' | 'pool' | 'rigs' | 'group' | 'rig' | 'notfound' | 'trace' | 'owner';
 export type Modal = 'supply' | 'withdraw' | 'repay' | 'screen';
 
 export interface Route {
@@ -51,6 +51,8 @@ export function parseHash(hash: string): Route {
   if (a === 'trace' && p.length === 1) return base('trace', view, { redirect: to('/tape') });
   if (a === 'tape' && p.length === 1) return base('trace', view);
   if (a === 'markets' && p.length === 1) return base('markets', view);
+  // the owner's screen passes (SPEC-PHASE5-REGISTER §8): linked from Telegram, not in the navigation
+  if (a === 'owner' && p.length === 1) return base('owner', view);
   if (a === 'markets' && b === 'bem' && p.length === 2) return base('pool', view);
   if ((a === 'borrow' || a === 'loans') && p.length === 1) return base('rigs', view, { redirect: to('/rigs') });
   if (a === 'rigs') {

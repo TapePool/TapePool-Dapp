@@ -1,7 +1,9 @@
+import { DAY } from '../constants';
 import { buildRigView } from '../logic/rigState';
-import type { GateRecord, HarvestView, LoanPhase, ParamKey, PoolParams, Snapshot, WalletOption } from '../model';
+import type { GateRecord, HarvestView, LoanPhase, ParamKey, PoolParams, ScreenArtifact, ScreenRecord, Snapshot, WalletOption } from '../model';
 import { freshUi, type UiState } from '../state';
 import {
+  ACCOUNT,
   AGENT_B,
   AGENT_C,
   CONTRACTS,
@@ -36,6 +38,42 @@ export interface FixtureDef {
 
 const connected = (): Snapshot => baseSnapshot();
 const all = (): Snapshot => withAllStates(baseSnapshot());
+
+/* ───────── "Register to borrow" (SPEC-PHASE5-REGISTER) ───────── */
+
+const TAPEOUT_CPU = '0xb1024b89886B9a34Aa4ff5F31C411D708b20a14C' as const;
+const OWNER_OTHER = '0x19a953E83c4cFdFFFF2fd336f3857C52d99045bA' as const;
+
+const artifact4301 = (): ScreenArtifact => ({ file: 'rig-4301-55f3c1aa.json', hash: `0x55f3c1aa${'0'.repeat(56)}`, verdict: 'PASS', circuits: TAPEOUT_CPU, circuitId: 4301n, taskId: 4n, bscBlock: 134_720_632n, verified: true });
+
+const record = (rigId: number, over: Partial<ScreenRecord>): ScreenRecord => ({ rigId, status: 'queued', requestedAt: T0 - 600, updatedAt: T0 - 300, attempts: 1, retryAt: null, code: null, reasons: [], artifact: null, hosts: null, ...over });
+
+/** Every state, with rig #4301's registration as given. */
+const withScreen = (over: Partial<ScreenRecord>, paused = false): Snapshot => ({ ...all(), screens: { open: true, paused, records: { '4301': record(4301, over) } } });
+
+/** Rig `id` without any screen pass on chain. */
+const withoutPass = (s: Snapshot, id: number): Snapshot => ({ ...s, rigs: s.rigs.map((r) => (r.id === id ? buildRigView({ ...r.facts, screen: { pass: null, suspended: false } }, s.now) : r)) });
+
+/** The owner page: one PASS waiting, one recorded, one FAIL and one error; `owner` is `pool.owner()`. */
+function ownerPage(owner: `0x${string}`): Snapshot {
+  const s = connected();
+  const records: Record<string, ScreenRecord> = {
+    '4301': record(4301, { status: 'pass', artifact: artifact4301(), hosts: { checkBsc: 'binance.org', checkXlayer: 'drpc.org', verifyBsc: 'blastapi.io', verifyXlayer: 'xlayer.tech' } }),
+    '19': record(19, { status: 'recorded', artifact: { ...artifact4301(), file: 'rig-19-4442ae03.json', hash: `0x4442ae03${'0'.repeat(56)}`, circuitId: 19n } }),
+    '20': record(20, { status: 'fail', code: 'too-wide', reasons: ['too wide: 24 input bits over the 20-bit equivalence limit'], artifact: { ...artifact4301(), file: 'rig-20-0badc0de.json', hash: `0x0badc0de${'0'.repeat(56)}`, verdict: 'FAIL', circuitId: 20n } }),
+    '21': record(21, { status: 'error', code: 'verify', retryAt: T0 + DAY, reasons: ['<b>BSC block hash differs from the artifact</b>'] }),
+  };
+  return {
+    ...s,
+    screens: { open: true, paused: false, records },
+    ownerScreens: {
+      owner,
+      registryOk: true,
+      chain: { '4301': { pass: null, suspended: false }, '19': { pass: { circuits: TAPEOUT_CPU, circuitId: 19n, taskId: 4n, effectiveAt: T0 + DAY }, suspended: false }, '20': { pass: null, suspended: false }, '21': { pass: null, suspended: false } },
+      keeperUrl: 'https://keeper.example',
+    },
+  };
+}
 
 const mapWallet = (s: Snapshot, w: Partial<Snapshot['wallet']>): Snapshot => ({ ...s, wallet: { ...s.wallet, ...w } });
 
@@ -329,7 +367,26 @@ export const FIXTURES: Record<string, FixtureDef> = {
   /* modals */
   'supply-modal': { title: 'Supply modal', hash: '#/app/supply', build: connected },
   'withdraw-modal': { title: 'Withdraw modal', hash: '#/app/withdraw', build: connected, ui: (u) => { u.sup.tab = 'withdraw'; } },
-  'screen-note': { title: 'Ask for a screen: the note', hash: '#/app/rigs/4301/screen', build: connected },
+  'screen-note': { title: 'Register to borrow: the screen modal', hash: '#/app/rigs/4301/screen', build: connected },
+  'screen-note-closed': { title: 'The screen modal while registration is closed: the static note', hash: '#/app/rigs/4301/screen', build: () => ({ ...connected(), screens: null }) },
+
+  /* "Register to borrow" (SPEC-PHASE5-REGISTER §5): rig #4301 has no pass */
+  'register-closed': { title: 'S2: keeper unreachable, the static note', hash: '#/app/rigs/4301', build: () => ({ ...all(), screens: null }) },
+  'register-closed-delay-unread': { title: 'S2 with RigScreen.DELAY unread: no number', hash: '#/app/rigs/4301', build: () => ({ ...all(), screens: null, screenDelay: null }) },
+  'register-queued': { title: 'S4: registered, waiting', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'queued', attempts: 0 }) },
+  'register-paused': { title: 'S4p: registered, checks paused', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'queued', attempts: 0 }, true) },
+  'register-checking': { title: 'S5: checking', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'checking' }) },
+  'register-passed': { title: 'S6: passed, waiting for the team', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'pass', artifact: artifact4301() }) },
+  'register-fail': { title: 'S7: cannot borrow', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'fail', code: 'wrong-output', reasons: ['V2: challenge of official vector 3 gave success (the miner would be revoked), not Corr()'], artifact: { ...artifact4301(), verdict: 'FAIL' } }) },
+  'register-revoked': { title: 'S8: the pass was removed', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'revoked', artifact: artifact4301() }) },
+  'register-error': { title: 'S9: the check did not finish', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'error', code: 'transient', retryAt: T0 + 6 * 3_600, reasons: ['BSC eth_call failed after 3 attempts'] }) },
+  'register-retry': { title: 'S10: try again', hash: '#/app/rigs/4301', build: () => withScreen({ status: 'error', code: 'check', retryAt: T0 - 60 }) },
+  'register-too-new': { title: 'Row 10 with no pass: the age line, then Register', hash: '#/app/rigs/4233', build: () => withoutPass(all(), 4233) },
+  'register-cards': { title: 'Rigs page with registrations', hash: '#/app/rigs', build: () => withScreen({ status: 'checking' }) },
+
+  /* the owner's page (SPEC-PHASE5-REGISTER §8) */
+  'owner-page': { title: 'Owner page: a PASS to sign', hash: '#/app/owner', build: () => ownerPage(ACCOUNT) },
+  'owner-page-other': { title: 'Owner page from a wallet that is not the owner', hash: '#/app/owner', build: () => ownerPage(OWNER_OTHER) },
 };
 
 export const DEFAULT_FIXTURE = 'disconnected';

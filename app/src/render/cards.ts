@@ -1,12 +1,23 @@
 import { html, type Html } from '../html';
+import { delayParts } from '../logic/screen';
 import { t, th } from '../i18n';
 import { chip, soon, type Ctx } from './ui';
 
-export function elig(): Html {
+/** The screen line names the delay only as `RigScreen.DELAY()` reads it (SPEC-PHASE5-REGISTER R-5). */
+function passDelay(c: Ctx): string {
+  const d = delayParts(c.snap.screenDelay);
+  const n = d ? ('h' in d ? d.h : d.min) : null;
+  if (n === 0) return t('It matches all official test vectors. Its on-chain screen pass takes effect once it is recorded.', '矿机须通过全部官方测试向量。筛查结果上链后立即生效。');
+  if (!d || n === null) return t('It matches all official test vectors. Its on-chain screen pass takes effect after a public waiting period.', '矿机须通过全部官方测试向量。筛查结果上链并经过公开等待期后生效。');
+  const span = 'h' in d ? t(`${n} hours`, `${n} 小时`) : t(`${n} minutes`, `${n} 分钟`);
+  return t(`It matches all official test vectors. Its on-chain screen pass takes effect after ${span}.`, `矿机须通过全部官方测试向量。筛查结果上链 ${span}后生效。`);
+}
+
+export function elig(c: Ctx): Html {
   return html`<section class="v2-card" aria-labelledby="el"><div class="v2-card-h"><h2 id="el"><span class="uid" aria-hidden="true">R1</span>${t('When a rig can borrow', '矿机可借条件')}</h2></div><div class="v2-card-b"><ol class="ol-elig">
     <li>${t('Processor: TapeOut, Behemoth or RefBench.', '处理器为 TapeOut、Behemoth 或 RefBench。')}</li>
     <li>${t('It is at least 3 days old.', '矿机上线至少 3 天。')}</li>
-    <li>${t('It matches all official test vectors. Its on-chain screen pass takes effect after 48 hours.', '矿机须通过全部官方测试向量。筛查结果上链 48 小时后生效。')}</li>
+    <li>${passDelay(c)}</li>
     <li>${t('Its base power is above 0, and it is not stopped, revoked or rescued by the TapeOut Safe. Only base power counts; the design bonus is left out.', '基础算力大于 0，且未停止、未被撤销、未被 TapeOut 多签强制取回（rescue）。只计算基础算力，不计设计加成。')}</li></ol></div>
     <div class="v2-card-f">${t('Bridge missing rigs to your own X Layer wallet on tapeout.net. Never bridge directly to an agent.', '如缺少矿机，请在 tapeout.net 将其跨链至您自己的 X Layer 钱包。请勿直接跨链至代理。')}</div></section>`;
 }

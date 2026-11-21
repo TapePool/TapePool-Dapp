@@ -1,7 +1,7 @@
 import { decodeErrorResult, toFunctionSelector, type Abi } from 'viem';
 import { bemTrim, native } from '../logic/format';
 import type { Hex } from '../model';
-import { agentFactoryAbi, bscBemAbi, bscVaultAbi, extraErrorsAbi, reporterAbi, rigAgentAbi, tapePoolAbi } from './abi';
+import { agentFactoryAbi, bscBemAbi, bscVaultAbi, extraErrorsAbi, reporterAbi, rigAgentAbi, rigScreenAbi, tapePoolAbi } from './abi';
 import { POLICY_DENIED, type AppError, type MsgParams } from './errors';
 
 /**
@@ -32,7 +32,7 @@ function union(...abis: readonly (readonly unknown[])[]): Abi {
   return out as unknown as Abi;
 }
 
-export const revertAbi: Abi = union(rigAgentAbi, tapePoolAbi, agentFactoryAbi, reporterAbi, extraErrorsAbi, bscVaultAbi, bscBemAbi);
+export const revertAbi: Abi = union(rigAgentAbi, tapePoolAbi, agentFactoryAbi, reporterAbi, extraErrorsAbi, bscVaultAbi, bscBemAbi, rigScreenAbi);
 
 /** What the messages of a revert may need. */
 export interface RevertCtx {

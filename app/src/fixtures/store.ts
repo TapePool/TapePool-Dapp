@@ -7,7 +7,7 @@ import { expectedOutput } from '../logic/creditMath';
 import { fee } from '../logic/fees';
 import { buildRigView } from '../logic/rigState';
 import { debtOf, isOpen } from '../logic/selectors';
-import type { Address, AgentView, LoanView, RigFacts, RigPlace, Sec, Snapshot } from '../model';
+import type { Address, AgentView, LoanView, RigFacts, RigPlace, ScreenRecord, Sec, Snapshot } from '../model';
 import type { ActionResult, Actions, BorrowArgs, DataSource } from '../source';
 import { collateralRow, gateRecord, quotesFor, type RuleAnswer } from './data';
 
@@ -424,5 +424,30 @@ export class FixtureStore implements DataSource, Actions {
     };
     this.emit();
     return ok({ notice: () => t('Withdrawn (sample). Nothing was sent.', '提取成功（示例），未发送任何交易。') });
+  }
+
+  /* ───────── "Register to borrow" and the owner's Sign (SPEC-PHASE5-REGISTER) ───────── */
+
+  async registerRig(id: number): Promise<ActionResult> {
+    const s = this.state.screens;
+    if (!s?.open) return fail({ kind: 'register', reason: 'registration is not open' });
+    const known = s.records[String(id)];
+    if (known && !(known.status === 'error' && (known.retryAt ?? 0) <= this.now())) return ok({ notice: () => t('This rig is already registered.', '这台矿机已提交过申请。') });
+    const now = this.now();
+    const record = { rigId: id, status: 'queued' as const, requestedAt: now, updatedAt: now, attempts: 0, retryAt: null, code: null, reasons: [], artifact: null, hosts: null };
+    this.set({ screens: { ...s, records: { ...s.records, [String(id)]: record } } });
+    return ok({ notice: () => t('Registered (sample). Nothing was sent.', '已提交申请（示例），未发送任何交易。') });
+  }
+
+  async recordPass(id: number, record: ScreenRecord): Promise<ActionResult> {
+    const owner = this.state.ownerScreens?.owner;
+    const me = this.state.wallet.account;
+    if (!owner || !me || !same(owner, me)) return fail({ kind: 'screen', why: 'not-owner' });
+    const a = record.artifact;
+    if (record.status !== 'pass' || !a?.verified || !a.circuits || a.circuitId === null || a.taskId === null) return fail({ kind: 'screen', why: 'not-ready' });
+    const effectiveAt = this.now() + (this.state.screenDelay ?? 0);
+    const chain = { ...(this.state.ownerScreens?.chain ?? {}), [String(id)]: { pass: { circuits: a.circuits, circuitId: a.circuitId, taskId: a.taskId, effectiveAt }, suspended: false } };
+    this.set({ ownerScreens: { ...this.state.ownerScreens!, chain } });
+    return ok({ notice: () => t('Pass recorded (sample). Nothing was sent.', '筛查通过结果已记录（示例），未发送任何交易。') });
   }
 }

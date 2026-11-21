@@ -11,6 +11,7 @@ import type {
   Hex,
   KeeperView,
   LoanView,
+  OwnerScreensView,
   PendingTx,
   PoolView,
   Quote,
@@ -20,6 +21,8 @@ import type {
   RigFacts,
   RigPlace,
   RigView,
+  ScreenRecord,
+  ScreensView,
   Sec,
   Section,
   Snapshot,
@@ -38,7 +41,7 @@ import { BRIDGE_FEE_BPS_MAX, BOND } from '../constants';
 import { gateOpen } from '../logic/gates';
 import { collectable, minedR } from '../logic/harvest';
 import { allowanceMap, assembleFacts, borrowGasCost, mapAgents, mapPool, placesOf } from './map';
-import { readCircuit, readCore, readHoldings, readQuoteFor, readQuotes, readRigRecords, type AgentRaw, type CircuitRaw, type PolicyPins, type ReadEnv, type XLayerRig } from './reads';
+import { readCircuit, readCore, readHoldings, readOwnerScreens, readQuoteFor, readQuotes, readRigRecords, readScreenDelay, type AgentRaw, type CircuitRaw, type PolicyPins, type ReadEnv, type XLayerRig } from './reads';
 import type { Head, Reader } from './reader';
 import { WalletActivity } from './activity';
 import type { BscResult } from './bsc';
@@ -182,6 +185,11 @@ export class ChainSource implements DataSource, ActionHost {
   private keeperPos: { address: string; data: KeeperPosition | null } | null = null;
   private keeperDownUntil = 0;
   private showTransactions = false;
+  /** SPEC-PHASE5-REGISTER §7.2, §8: the owner page is open, and the last registration list with when it was read. */
+  private wantOwner = false;
+  private screens: { view: ScreensView | null; at: number } = { view: null, at: Number.NEGATIVE_INFINITY };
+  private screenDelay: { value: Sec | null; read: boolean } = { value: null, read: false };
+  private ownerScreens: OwnerScreensView | null = null;
   private pendingTx: PendingTx | null;
   /** The pending mark was loaded from `sessionStorage` after a reload and no action in this session has taken it over. */
   private restored = false;
@@ -236,9 +244,12 @@ export class ChainSource implements DataSource, ActionHost {
     return () => this.listeners.delete(listener);
   }
 
-  snapshot(view: Address | null, showTransactions = false): Snapshot {
+  snapshot(view: Address | null, showTransactions = false, screens = false): Snapshot {
     const opened = showTransactions && !this.showTransactions;
     this.showTransactions = showTransactions;
+    const ownerOpened = screens && !this.wantOwner;
+    this.wantOwner = screens;
+    if (ownerOpened) void this.refresh();
     const target = this.targetOf(view);
     if (!same(this.wanted, target)) {
       this.wanted = target;
@@ -430,6 +441,7 @@ export class ChainSource implements DataSource, ActionHost {
 
     if (acct && gen === this.gen) await this.accountCycle(acct, core, head, gen);
     await keeperDone;
+    await this.readScreens(acct, head);
     if (acct && gen === this.gen) this.readActivity(acct, head);
     this.emit();
   }
@@ -614,6 +626,55 @@ export class ChainSource implements DataSource, ActionHost {
       this.keeperView = { ...this.keeperView, reachable: true, apy7d: stats.data?.apy7d ?? null };
     }
     if (target && pos && gen === this.gen) this.keeperPos = { address: target.toLowerCase(), data: pos.data };
+  }
+
+  /** A rig of the account is at §5.2 row 10, 12 (no pass) or 13: its line needs the keeper's registrations (SPEC-PHASE5-REGISTER §7.2). */
+  private needsScreens(acct: Acct | null, now: Sec): boolean {
+    return this.rigViews(acct, now).some((r) => {
+      const s = r.state;
+      return r.facts.place.kind === 'wallet' && (s.kind === 'too-new' || s.kind === 'screen-pending' || (s.kind === 'not-screened' && s.why === 'none'));
+    });
+  }
+
+  /** The registration list, `RigScreen.DELAY()` once, and on the owner page its own chain reads. Never throws. */
+  private async readScreens(acct: Acct | null, head: Head): Promise<void> {
+    // once per session, for an account's pages (the eligibility card names the delay too, and only as the chain says it)
+    if (!acct && !this.wantOwner) return;
+    if (!this.screenDelay.read) {
+      try {
+        this.screenDelay = { value: await readScreenDelay(this.env, head.number), read: true };
+      } catch {
+        /* read again on the next refresh */
+      }
+    }
+    if (!this.wantOwner && !this.needsScreens(acct, head.timestamp)) return;
+    const list = this.deps.keeper.screens;
+    if (this.cfg.keeperUrl && list && this.clock() >= this.keeperDownUntil) {
+      try {
+        const a = await list(this.cfg.book.screen);
+        // only a 200 with a list for this RigScreen replaces the last one (L6). Anything else (no answer, a 404 or 5xx, a list
+        // for another RigScreen) keeps the last answer until it is a minute old; after that the rig shows the static note (§5)
+        if (a.data) this.screens = { view: a.data, at: this.clock() };
+      } catch {
+        /* keep the last list until it goes stale */
+      }
+    }
+    if (this.wantOwner) {
+      const ids = Object.keys(this.screens.view?.records ?? {}).map(Number);
+      try {
+        this.ownerScreens = { ...(await readOwnerScreens(this.env, head.number, ids)), keeperUrl: this.cfg.keeperUrl };
+      } catch {
+        this.ownerScreens = null;
+      }
+    }
+  }
+
+  /** A registration the keeper just answered with: shown at once, before the next list read. */
+  noteScreen(record: ScreenRecord): void {
+    const view = this.screens.view;
+    if (!view) return;
+    this.screens = { view: { ...view, records: { ...view.records, [String(record.rigId)]: record } }, at: this.screens.at };
+    this.emit();
   }
 
   private seizedIds(agents: readonly AgentRaw[]): Map<string, number[]> {
@@ -803,6 +864,10 @@ export class ChainSource implements DataSource, ActionHost {
       principalQuotes: true,
       entry: acct?.entry ?? {},
       harvest: this.harvestView(acct),
+      // a list older than a minute is not shown: the rig falls back to the static note (SPEC-PHASE5-REGISTER §5)
+      screens: this.clock() - this.screens.at <= STALE_AFTER_MS ? this.screens.view : null,
+      screenDelay: this.screenDelay.value,
+      ownerScreens: this.wantOwner ? this.ownerScreens : undefined,
       pending: this.pendingTx,
       stale,
     };

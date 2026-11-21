@@ -3,7 +3,7 @@ import type { AddressBook } from '../config';
 import { QUEUE_GRACE } from '../constants';
 import type { LoanRaw } from '../logic/loan';
 import type { ReportRaw } from '../logic/bscReader';
-import type { Address, Hex, PrincipalQuote, Quote, TermIndex } from '../model';
+import type { Address, Hex, OwnerScreensView, PrincipalQuote, Quote, TermIndex } from '../model';
 import { agentFactoryAbi, circuitsAbi, creditPolicyAbi, erc20Abi, feedReceiverAbi, multicall3Abi, rigAgentAbi, rigScreenAbi, tapeLensAbi, tapePoolAbi, voucherAbi } from './abi';
 import { call, multicall, type Result } from './multicall';
 import { legacyLensRuntime } from './legacyAbi';
@@ -367,6 +367,39 @@ export async function readRigRecords(env: ReadEnv, block: bigint, ids: readonly 
     });
   });
   return out;
+}
+
+/* ───────── "Register to borrow" and the owner page (SPEC-PHASE5-REGISTER §7.2, §8) ───────── */
+
+/** `RigScreen.DELAY()` in seconds; null when it cannot be read (the copy then names no number). */
+export async function readScreenDelay(env: ReadEnv, block: bigint): Promise<number | null> {
+  const [d] = await multicall(env.x, env.book.multicall3, [call<bigint>(env.book.screen, rigScreenAbi, 'DELAY')] as const, { block });
+  return d.ok && d.value <= 10n ** 9n ? Number(d.value) : null;
+}
+
+/** `pool.owner()`, `RigScreen.pool()` and `passOf` for each listed rig, one round. A failed read is null, never a guess. */
+export async function readOwnerScreens(env: ReadEnv, block: bigint, ids: readonly number[]): Promise<OwnerScreensView> {
+  const { book } = env;
+  const rows = (await multicall(
+    env.x,
+    book.multicall3,
+    [
+      call<Address>(book.pool, tapePoolAbi, 'owner'),
+      call<Address>(book.screen, rigScreenAbi, 'pool'),
+      ...ids.map((id) => call<readonly [{ circuits: Address; circuitId: bigint; taskId: number; effectiveAt: bigint }, boolean]>(book.screen, rigScreenAbi, 'passOf', [BigInt(id)])),
+    ],
+    { block },
+  )) as unknown as Result<unknown>[];
+  const owner = optional(rows[0] as Result<Address>);
+  const registry = optional(rows[1] as Result<Address>);
+  const chain: OwnerScreensView['chain'] = {};
+  ids.forEach((id, k) => {
+    const r = optional(rows[k + 2] as Result<readonly [{ circuits: Address; circuitId: bigint; taskId: number; effectiveAt: bigint }, boolean]>);
+    chain[String(id)] = r
+      ? { pass: r[0].effectiveAt === 0n ? null : { circuits: r[0].circuits, circuitId: r[0].circuitId, taskId: BigInt(r[0].taskId), effectiveAt: Number(r[0].effectiveAt) }, suspended: r[1] }
+      : null;
+  });
+  return { owner, registryOk: registry === null ? null : registry.toLowerCase() === book.pool.toLowerCase(), chain };
 }
 
 /* ───────── round 5: the lens ───────── */

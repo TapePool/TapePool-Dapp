@@ -77,7 +77,8 @@ export const SPECS = [
       'voucher', 'pinsOk', 'check', 'maxDebt', 'MIN_RIG_AGE', 'version',
     ],
   },
-  { file: 'rigScreen', name: 'rigScreenAbi', artifact: 'RigScreen.sol/RigScreen.json', fns: ['passOf', 'isEffective'] },
+  // recordPass, DELAY and pool: the owner page (SPEC-PHASE5-REGISTER §8); the errors decode a refused recordPass
+  { file: 'rigScreen', name: 'rigScreenAbi', artifact: 'RigScreen.sol/RigScreen.json', fns: ['passOf', 'isEffective', 'recordPass', 'DELAY', 'pool'], errors: true },
   { file: 'tapeLens', name: 'tapeLensAbi', artifact: 'TapeLens.sol/TapeLens.json', fns: ['quote', 'quoteFor'], bytecode: 'tapeLensRuntime' },
   { file: 'feedReceiver', name: 'feedReceiverAbi', artifact: 'RigFeedReceiver.sol/RigFeedReceiver.json', fns: ['latest'] },
   { file: 'reporter', name: 'reporterAbi', artifact: 'RigReporter.sol/RigReporter.json', fns: ['quote', 'push'], errors: true },

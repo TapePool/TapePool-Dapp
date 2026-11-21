@@ -1,5 +1,5 @@
 import type { AddressBook } from '../config';
-import type { ActionId, Address, Ask, Hex, PendingTx, Sec } from '../model';
+import type { ActionId, Address, Ask, Hex, PendingTx, ScreenRecord, Sec } from '../model';
 import type { AppError } from './errors';
 import type { Reader, ReceiptInfo } from './reader';
 import { codeOf, fromFailure, type RevertCtx } from './revert';
@@ -22,6 +22,8 @@ export interface ActionHost {
   refresh(): Promise<void>;
   noteRelease?(agent: Address, attempts: number): void;
   noteLoanCleared(agent: Address, info: { clearedAt: Sec; surplus: bigint | null }): void;
+  /** A registration the keeper just answered with (SPEC-PHASE5-REGISTER §7.1): shown at once, before the next list read. */
+  noteScreen?(record: ScreenRecord): void;
 }
 
 export interface TxDeps {

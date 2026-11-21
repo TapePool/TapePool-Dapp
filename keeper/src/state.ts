@@ -12,6 +12,7 @@ import type { Spend } from "./logic/budget.js";
 import type { PendingTx, SendResult } from "./tx.js";
 import type { HarvestLanding } from "./logic/harvestLanding.js";
 import { initialDuplicateWatch, type DuplicateWatch } from "./logic/duplicateWatch.js";
+import { cleanScreenState, emptyScreenState, type ScreenState } from "./screens.js";
 
 export interface DailyCounts {
   day: number;
@@ -27,6 +28,9 @@ export const emptyDay = (day: number): DailyCounts => ({ day, harvests: 0, pushe
 /** A day record written before part E lacks its new counters. */
 const cleanDay = (d: Partial<DailyCounts> | undefined, fallback: DailyCounts): DailyCounts =>
   d ? { ...emptyDay(d.day ?? fallback.day), ...d, coveredThenMatured: d.coveredThenMatured ?? 0, jobFailures: d.jobFailures ?? {} } : fallback;
+
+/** A screen section from an older file (or none) starts empty; each malformed record or counter is dropped (L4). */
+const cleanScreen = (s: unknown): ScreenState => cleanScreenState(s);
 
 export interface KeeperState {
   income: IncomeState;
@@ -61,6 +65,8 @@ export interface KeeperState {
   watch: WatchState;
   stats: StatsState; // SPEC-PHASE5-APP §8.1: daily share-price snapshots (rebuilt from archive reads if lost)
   index: IndexState; // SPEC-PHASE5-APP §8.2: the position index with its own cursor (rebuilt from the deploy block if lost)
+  /** SPEC-PHASE5-REGISTER §6.6: registrations, their screen results and the admission counters, per RigScreen. */
+  screen: ScreenState;
 }
 
 export function emptyState(startBlock: bigint, factory = ""): KeeperState {
@@ -86,6 +92,7 @@ export function emptyState(startBlock: bigint, factory = ""): KeeperState {
     watch: initialWatchState(),
     stats: emptyStats(),
     index: emptyIndex(),
+    screen: emptyScreenState(),
   };
 }
 
@@ -112,6 +119,8 @@ export function loadState(path: string, startBlock: bigint, factory = ""): Keepe
       previousDay: cleanDay(s.previousDay, fresh.previousDay),
       lastSummaryDay: s.lastSummaryDay ?? 0,
       watch: { ...initialWatchState(), lastSeen: s.watch?.lastSeen ?? {} },
+      // keyed by its RigScreen, not the factory: ScreenService resets it when the configured RigScreen differs
+      screen: cleanScreen(s.screen),
     };
     // The app-route data belongs to a pool. A file from before these sections existed starts them empty,
     // and PublicData resets either one when its pool differs from the configured one.

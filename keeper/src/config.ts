@@ -2,6 +2,7 @@
 // are registered for log redaction; they are never logged or put in an alert.
 import { getAddress, isAddress, parseEther, zeroAddress, type Hex } from "viem";
 import { DEPLOYMENT, type Deployment } from "./addresses.js";
+import { providerOf, urlList } from "./screen/provider.js";
 
 export type Mode = "dry" | "live";
 
@@ -25,7 +26,23 @@ export interface Config {
   statePath: string;
   suspendOnRevoke: boolean; // K-O5
   holdHarvestOnVaultFreeze: boolean; // K-O6
+  /** The automatic screen behind "Register to borrow" (SPEC-PHASE5-REGISTER §6.1); null keeps registration closed. */
+  screen: ScreenConfig | null;
   secrets: string[];
+}
+
+/**
+ * Endpoints and limits of the automatic screen. Each side is an ordered list: public endpoints first, a keyed one as the
+ * fallback (owner, Q2, 2026-11-21). The verify side must be another provider than the check side for every PASS.
+ */
+export interface ScreenConfig {
+  bscRpcs: string[];
+  xlayerRpcs: string[];
+  verifyBscRpcs: string[];
+  verifyXlayerRpcs: string[];
+  /** Base of the owner-page link sent on Telegram, without a trailing slash. */
+  appUrl: string;
+  dailyMax: number;
 }
 
 /** Per-rig, per-borrower and per-IP push limits are constants (SPEC-PHASE3-KEEPER §5.3 rule 6, part D D-O4). */
@@ -86,6 +103,56 @@ const PUBLIC_XLAYER_RPC = "https://rpc.xlayer.tech";
 /** The known public X Layer endpoints: not secret. Any other URL in XLAYER_RPC is redacted (part E §3.2). */
 const PUBLIC_XLAYER_RPCS = [PUBLIC_XLAYER_RPC, "https://xlayerrpc.okx.com", "https://xlayer.drpc.org"];
 
+const bare = (u: string) => u.trim().replace(/\/+$/, "");
+const isPublicXlayer = (u: string) => PUBLIC_XLAYER_RPCS.includes(bare(u));
+
+/** An https URL, or http on a local host, without its trailing slash. */
+function appUrl(raw: string | undefined): string {
+  const v = raw?.trim() || "https://app.tapepool.io";
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    throw new Error("SCREEN_APP_URL must be a URL");
+  }
+  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]";
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) throw new Error("SCREEN_APP_URL must be https");
+  return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+}
+
+/**
+ * SPEC-PHASE5-REGISTER §6.1: registration is on only with a second BSC provider. Each `SCREEN_*` RPC variable is an ordered,
+ * comma-separated list (public first, a keyed fallback last). Every entry must be an http(s) URL, and the first entries of
+ * the check and verify sides must be different providers; anything else stops the keeper at start-up. A fallback that
+ * would serve both sides of one run is caught per run (job.ts): that run gives no PASS.
+ */
+export function loadScreenConfig(env: NodeJS.ProcessEnv, bscRpc: string, xlayerRpcs: string[]): ScreenConfig | null {
+  const verifyBsc = urlList(env.SCREEN_VERIFY_BSC_RPC);
+  if (verifyBsc.length === 0) return null;
+  const checkBsc = urlList(env.SCREEN_BSC_RPC);
+  if (checkBsc.length === 0) checkBsc.push(bscRpc);
+  const checkX = urlList(env.SCREEN_XLAYER_RPC);
+  if (checkX.length === 0) checkX.push(xlayerRpcs[0] || PUBLIC_XLAYER_RPC);
+  const verifyX = urlList(env.SCREEN_VERIFY_XLAYER_RPC);
+  if (verifyX.length === 0) verifyX.push(providerOf(checkX[0]!) === providerOf(PUBLIC_XLAYER_RPC) ? "https://xlayerrpc.okx.com" : PUBLIC_XLAYER_RPC);
+  // shape only: the URLs are secrets, so the error names the variable and the entry, never the value
+  for (const [name, list] of [["SCREEN_VERIFY_BSC_RPC", verifyBsc], ["SCREEN_BSC_RPC (or BSC_RPC)", checkBsc], ["SCREEN_XLAYER_RPC (or XLAYER_RPC)", checkX], ["SCREEN_VERIFY_XLAYER_RPC", verifyX]] as const) {
+    list.forEach((v, i) => {
+      let ok = false;
+      try {
+        const u = new URL(v);
+        ok = (u.protocol === "https:" || u.protocol === "http:") && u.hostname !== "";
+      } catch {
+        ok = false;
+      }
+      if (!ok) throw new Error(`${name} must be a comma-separated list of http(s) URLs (entry ${i + 1} is not)`);
+    });
+  }
+  if (providerOf(verifyBsc[0]!) === providerOf(checkBsc[0]!)) throw new Error("SCREEN_VERIFY_BSC_RPC must start with another provider than the check's BSC endpoint");
+  if (providerOf(verifyX[0]!) === providerOf(checkX[0]!)) throw new Error("SCREEN_VERIFY_XLAYER_RPC must start with another provider than the check's X Layer endpoint");
+  return { bscRpcs: checkBsc, xlayerRpcs: checkX, verifyBscRpcs: verifyBsc, verifyXlayerRpcs: verifyX, appUrl: appUrl(env.SCREEN_APP_URL), dailyMax: num(env, "SCREEN_DAILY_MAX", 20) };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const modeRaw = (env.KEEPER_MODE ?? "dry").trim().toLowerCase();
   if (modeRaw !== "dry" && modeRaw !== "live") throw new Error("KEEPER_MODE must be dry or live");
@@ -100,6 +167,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     .filter(Boolean);
   const xlayerRpcs = listed.length > 0 ? listed : [PUBLIC_XLAYER_RPC];
   const xlayerRpc = xlayerRpcs[0]!;
+  const screen = loadScreenConfig(env, bscRpc, xlayerRpcs);
+  // every BSC entry is redacted (a keyed fallback may sit in either list); X Layer entries unless they are the known public nodes
+  const screenSecrets = screen ? [...screen.bscRpcs, ...screen.verifyBscRpcs, ...[...screen.xlayerRpcs, ...screen.verifyXlayerRpcs].filter((u) => !isPublicXlayer(u))] : [];
   return {
     deployment: loadDeployment(env),
     mode: modeRaw,
@@ -119,7 +189,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     statePath: env.STATE_PATH?.trim() || "/data/state.json",
     suspendOnRevoke: flag(env, "SUSPEND_ON_REVOKE", true),
     holdHarvestOnVaultFreeze: flag(env, "HOLD_HARVEST_ON_VAULT_FREEZE", true),
+    screen,
     // a keyed X Layer endpoint is as secret as the BSC one: RPC errors quote the URL
-    secrets: [privateKey, privateKey.slice(2), bscRpc, telegramToken, ...xlayerRpcs.filter((u) => !PUBLIC_XLAYER_RPCS.includes(u.replace(/\/+$/, "")))],
+    secrets: [...new Set([privateKey, privateKey.slice(2), bscRpc, telegramToken, ...xlayerRpcs.filter((u) => !PUBLIC_XLAYER_RPCS.includes(u.replace(/\/+$/, ""))), ...screenSecrets])],
   };
 }

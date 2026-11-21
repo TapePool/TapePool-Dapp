@@ -54,6 +54,44 @@ The anvil scenarios (`test/anvil.int.test.ts`) fork BSC and X Layer locally, dep
 against the forks with auto-impersonated accounts. `BSC_RPC` must be an archive endpoint; it is only read.
 Set `KEEPER_TRACE=<file>` to log the stack's setup timings.
 
+## Register to borrow (SPEC-PHASE5-REGISTER)
+
+"Register to borrow" in the app asks the keeper to run the revocation screen for one voucher. The keeper runs the screen
+tool's own code (vendored byte for byte in `src/screen/vendor/`; run `node scripts/sync-screen.mjs` after a change in
+`../screen/src`, and `test/screenVendor.test.ts` fails on drift) in a worker thread, one run at a time, then reproduces the
+artifact on a second provider (`verify` at the pinned blocks). It never sends a transaction: only the owner's wallet records
+a pass, from the app's owner page (`#/app/owner`).
+
+- `POST /v1/register` `{"rigId":"16"}`: `queued`, `known` (the current record), `recorded` or `refused` with a reason. Its own
+  admission limits (10 per IP per hour, 30 per minute, persisted), one record per voucher, a queue of 20 and `SCREEN_DAILY_MAX`
+  runs per UTC day. CORS for `APP_ORIGINS`, with a preflight.
+- `GET /v1/screens`: the records (at most 500, by rig id), from memory; `GET /v1/screens/<rigId>/artifact`: the artifact's exact bytes, named by its
+  hash, for anyone to `screen verify`. Both behind the read limiter.
+- Telegram: PASS with the owner-page link, FAIL with its reason, errors, and a queue pause on a protocol change.
+- After a change of the reviewed constants (or any vendored screen source), re-sync and redeploy: on start the keeper
+  queues again every PASS still waiting for a signature, because its tool hash changed. Do not sign an older PASS.
+- Artifacts live next to the state file (`<dirname(STATE_PATH)>/screen-artifacts/`); records in `state.json` (`screen`).
+- Settings: `SCREEN_VERIFY_BSC_RPC` (required to open registration), `SCREEN_BSC_RPC` (default `BSC_RPC`),
+  `SCREEN_XLAYER_RPC` (default the first `XLAYER_RPC`), `SCREEN_VERIFY_XLAYER_RPC` (default another public X Layer node),
+  `SCREEN_APP_URL` (default `https://app.tapepool.io`), `SCREEN_DAILY_MAX` (default 20). Without `SCREEN_VERIFY_BSC_RPC` the
+  route answers "registration is not open" and nothing changes.
+- **Endpoint lists (owner, 2026-11-21: public first, QuickNode only as the fallback).** Each `SCREEN_*` RPC variable is an
+  ordered, comma-separated list. Within a run, a transport failure (no answer after the retries, an HTTP error, a block
+  the node does not have) moves that side to its next URL; a revert or any verdict never does. Every run starts again from
+  the first URL. The reproduction never uses the provider that served the check (the last two host labels, so two
+  QuickNode keys are one provider), also after a fallback: if no other provider answers, that run gives no PASS and is
+  retried later. Each record shows which provider served each side (`hosts`, never a URL). Every BSC entry is redacted.
+  Recommended Railway values (both public BSC endpoints served rig 19's check and reproduction on 2026-11-20):
+
+  ```
+  SCREEN_BSC_RPC=https://bsc-dataseed.binance.org,<the QuickNode BSC_RPC>
+  SCREEN_VERIFY_BSC_RPC=https://bsc-mainnet.public.blastapi.io,<a second fallback of the owner's choice, or omit>
+  ```
+
+  Leave the X Layer variables unset: the check uses the first `XLAYER_RPC` (`https://xlayer.drpc.org` on Railway) and the
+  reproduction `https://rpc.xlayer.tech`. The first entries of the check and verify lists must be different providers,
+  or the keeper refuses to start.
+
 ## Redeploy 4 cutover (RB4-03, RD4-11)
 
 The owner performs this cutover after the reviewed code and deployment gates pass. Code and environment move

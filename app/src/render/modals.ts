@@ -2,8 +2,8 @@ import { TWITTER_URL } from '../config';
 import { bem4, bemExact, parseAmount } from '../logic/format';
 import { EMPTY, html, raw, type Html } from '../html';
 import { t } from '../i18n';
-import { debtOf, isOpen, loanForRig } from '../logic/selectors';
-import { screenNote } from './rigs';
+import { debtOf, isOpen, loanForRig, rigById } from '../logic/selectors';
+import { countsLine, lineAction, lineKind, lineOf, lineText, screenNote } from './register';
 import { assetSeg, supplyBody } from './supply';
 import { walletAsk } from './shell';
 import { B, act, cl, img, type Ctx } from './ui';
@@ -43,10 +43,16 @@ export function repayModal(c: Ctx, id: number): Html {
     ${need === 0n ? html`<div class="steps">${act(c, { a: 'sweep', v: L.rigIds[0] ?? id, size: 'lg', needs: ['loans'] }, t("Apply the agent's BEM", '用代理中的 BEM 还款'))}</div>` : html`<div class="steps">${act(c, { a: 'approve-repay', v: id, size: 'lg', offKind: allowed ? 's' : 'x', disabled: off || allowed, needs: ['loans', 'wallet'] }, allowed ? t('1 · BEM allowed', '1 · 已授权 BEM') : t('1 · Allow BEM', '1 · 授权 BEM'))}${act(c, { a: 'repay-do', v: id, size: 'lg', disabled: !(allowed && !off), needs: ['loans', 'wallet'] }, t('2 · Repay', '2 · 还款'))}</div>`}`);
 }
 
-/** The note that replaces the request form (option C of SPEC-PHASE5-APP §12). */
+/**
+ * What the screen is, and where this rig stands in "Register to borrow" (SPEC-PHASE5-REGISTER §7.1). The route stays, so old
+ * links to it keep working; when the keeper cannot take registrations it shows the static note of SPEC-PHASE5-APP §12.
+ */
 export function screenModal(c: Ctx, id: number): Html {
-  return frame(c, html`<div class="mdl-h"><h2 id="mdl-t">${t('Ask for a screen', '申请筛查')} · <span class="mono">#${id}</span></h2>${closeLink(c.link(`/rigs/${id}`))}</div>
+  const r = rigById(c.snap, id);
+  const line = r ? lineOf(c, r) : null;
+  const status = r && line ? cl(lineKind(line), html`${lineText(c, line)}`, lineAction(c, r, line)) : cl('i', html`${screenNote(c)}`, html`<a class="btn btn-s btn-sm" href="${TWITTER_URL}" target="_blank" rel="noopener noreferrer">${t('TapePool on X', 'X 上的 TapePool')}</a>`);
+  return frame(c, html`<div class="mdl-h"><h2 id="mdl-t">${t('Register to borrow', '申请借款资格')} · <span class="mono">#${id}</span></h2>${closeLink(c.link(`/rigs/${id}`))}</div>
     <p class="m0 c-soft">${t('Screening checks the rig for revocation risk.', '筛查用于识别矿机被撤销的风险。')}</p>
-    <p class="mut m0">${t(`The screen checks that #${id} matches every official vector of its task, locally and through PodMining's own challenge. It only reads data: you send no transaction. If it passes, the pass is recorded on-chain and counts 48 h later.`, `筛查会在本地并通过 PodMining 自身的 challenge 验证 #${id} 与其任务的全部官方测试向量一致。筛查只读取数据，您无需发起交易。通过后，结果记录在链上，48 小时后生效。`)}</p>
-    ${cl('i', html`${screenNote()}`, html`<a class="btn btn-s btn-sm" href="${TWITTER_URL}" target="_blank" rel="noopener noreferrer">${t('TapePool on X', 'X 上的 TapePool')}</a>`)}`);
+    <p class="mut m0">${t(`The screen checks that #${id} matches every official vector of its task, locally and through PodMining's own challenge. It only reads data: you send no transaction. If it passes, the TapePool team records the pass on-chain; ${countsLine(c)}.`, `筛查会在本地并通过 PodMining 自身的 challenge 验证 #${id} 与其任务的全部官方测试向量一致。筛查只读取数据，您无需发起交易。通过后，由 TapePool 团队将结果记录上链；${countsLine(c)}。`)}</p>
+    ${status}`);
 }

@@ -2,4 +2,11 @@
 export const rigScreenAbi = [
   {"type":"function","name":"passOf","inputs":[{"name":"rigId","type":"uint256"}],"outputs":[{"name":"pass","type":"tuple","components":[{"name":"circuits","type":"address"},{"name":"circuitId","type":"uint64"},{"name":"taskId","type":"uint32"},{"name":"effectiveAt","type":"uint64"},{"name":"artifactHash","type":"bytes32"}]},{"name":"isSuspended","type":"bool"}],"stateMutability":"view"},
   {"type":"function","name":"isEffective","inputs":[{"name":"rigId","type":"uint256"},{"name":"circuits","type":"address"},{"name":"circuitId","type":"uint64"},{"name":"taskId","type":"uint32"}],"outputs":[{"name":"","type":"bool"}],"stateMutability":"view"},
+  {"type":"function","name":"recordPass","inputs":[{"name":"rigId","type":"uint256"},{"name":"circuits","type":"address"},{"name":"circuitId","type":"uint64"},{"name":"taskId","type":"uint32"},{"name":"artifactHash","type":"bytes32"}],"outputs":[],"stateMutability":"nonpayable"},
+  {"type":"function","name":"DELAY","inputs":[],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
+  {"type":"function","name":"pool","inputs":[],"outputs":[{"name":"","type":"address"}],"stateMutability":"view"},
+  {"type":"error","name":"BadPass","inputs":[]},
+  {"type":"error","name":"NotGuardianOrOwner","inputs":[]},
+  {"type":"error","name":"NotOwner","inputs":[]},
+  {"type":"error","name":"ZeroAddress","inputs":[]},
 ] as const;

@@ -62,13 +62,31 @@ describe('settled copy decisions', () => {
     mustNot(m.html, 'data-a="alerts"', 'alerts');
   });
 
-  it('O-5 option C: a static note with the one confirmed handle, and no request button', () => {
+  it('Register to borrow replaces O-5 option C (SPEC-PHASE5-REGISTER R-1); the static note with the one confirmed handle stays as the fallback', () => {
     for (const lang of ['en', 'cn'] as const) {
       const m = make('screen-note', { lang });
-      must(m.html, 'https://x.com/Tape_Pool', 'link');
-      mustNot(m.text, /Send request|提交申请|Prototype|原型/, 'request');
+      // the footer links the handle on every page: look at the modal alone
+      const modal = (h: string) => h.slice(h.indexOf('<section class="mdl"'));
+      must(modal(m.html), 'data-a="screen-register"', 'register button');
+      mustNot(modal(m.html), 'https://x.com/Tape_Pool', 'no link while registration is open');
+      mustNot(m.text, /Send request|Ask for a screen|申请筛查|Prototype|原型/, 'old wording');
+      const closed = make('screen-note-closed', { lang });
+      must(modal(closed.html), 'https://x.com/Tape_Pool', 'fallback link');
+      mustNot(closed.html, 'data-a="screen-register"', 'no button while closed');
     }
-    must(make('screen-note', { lang: 'en' }).text, 'Every rig needs a screen pass before it can borrow. The TapePool team screens new rigs; a pass counts 48 h after it is recorded on-chain.', 'note');
+    // the delay is the one RigScreen.DELAY() reads (48 h in the fixtures); unread, the note names no number (R-5)
+    must(make('screen-note-closed', { lang: 'en' }).text, 'Every rig needs a screen pass before it can borrow. The TapePool team screens new rigs; a pass counts 48 h after it is recorded on-chain.', 'note');
+    const unread = make('register-closed-delay-unread', { lang: 'en' }).text;
+    must(unread, 'a pass counts after a public waiting period once it is recorded on-chain', 'no number');
+    mustNot(unread, /48 h/, 'no fixed delay');
+  });
+
+  it('the Register action is a distinct button from the agent Register, in both languages', () => {
+    const en = make('rig-not-screened', { lang: 'en' });
+    must(en.html, '<button type="button" class="btn btn-p btn-sm" data-a="screen-register" data-v="4301">Register to borrow</button>', 'en');
+    const cn = make('rig-not-screened', { lang: 'cn' });
+    must(cn.html, 'data-a="screen-register" data-v="4301">申请借款资格</button>', 'cn');
+    mustNot(cn.html, 'data-a="screen-register" data-v="4301">登记凭证', 'not the agent register wording');
   });
 
   it('the prototype states panel and the prototype notices are gone', () => {

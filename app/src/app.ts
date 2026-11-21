@@ -15,6 +15,7 @@ import { linker, parseHash, type Route } from './route';
 import type { ActionResult, Actions, DataSource, Notice } from './source';
 import { freshUi, resetFlow, type UiState } from './state';
 import { supplyMaxText, withdrawMaxText } from './render/supply';
+import { canSign, registerLine } from './logic/screen';
 
 export interface AppDeps {
   /** The elements of `index.html`. */
@@ -66,6 +67,9 @@ const WRITE_UI = new Set([
   'approve-supply',
   'supply',
   'withdraw',
+  // "Register to borrow" (a keeper request, no transaction) and the owner's Sign (SPEC-PHASE5-REGISTER §7.1, §8)
+  'screen-register',
+  'record-pass',
 ]);
 
 /** How long "Keep waiting" hides the offer to move anyway (seconds): another ten minutes. */
@@ -611,6 +615,20 @@ export function createApp(deps: AppDeps): App {
         await run(() => (a === 'supply' ? actions.supply(amount) : actions.approveSupply(amount)));
         if (a === 'supply' && lastOk && route.modal) go('');
         return;
+      }
+      case 'screen-register': {
+        // only a rig of this wallet whose line offers Register (S3) or Try again (S10); the keeper checks again anyway
+        const r = rigId === null ? undefined : rigById(snap, rigId);
+        const line = r ? registerLine(r, snap.screens, c.now) : null;
+        if (!r || !line || (line.kind !== 'register' && line.kind !== 'retry')) return;
+        const id = r.id;
+        return run(() => actions.registerRig(id));
+      }
+      case 'record-pass': {
+        // only a row the owner page shows a Sign button for; the action checks everything again from fresh reads and the bytes
+        const rec = rigId === null ? undefined : snap.screens?.records[String(rigId)];
+        if (!rec || !canSign(snap, rec)) return;
+        return run(() => actions.recordPass(rec.rigId, rec));
       }
       case 'withdraw': {
         const amount = parseAmount(ui.sup.wamount, 8);

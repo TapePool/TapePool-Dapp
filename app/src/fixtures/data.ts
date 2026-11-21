@@ -387,6 +387,9 @@ export function baseSnapshot(): Snapshot {
     reports: {},
     quotes: {},
     harvest: baseHarvest(),
+    // "Register to borrow" (SPEC-PHASE5-REGISTER): the keeper takes registrations and has none yet; RigScreen.DELAY() is 48 h
+    screens: { open: true, paused: false, records: {} },
+    screenDelay: 2 * DAY,
     pending: null,
     stale: {},
   };

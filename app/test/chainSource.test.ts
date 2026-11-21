@@ -405,13 +405,14 @@ describe('the account: wallet, agents, rigs and loans', () => {
     src.dispose();
   });
 
-  it('keeps the call budget of a refresh: seven X Layer rounds and five BSC rounds, then one fewer on each', async () => {
+  it('keeps the call budget of a refresh: nine X Layer rounds and five BSC rounds, then seven and four', async () => {
     const w = standardWorld();
     const { src } = source(w, ACCOUNT);
     await src.refresh();
-    // X Layer: core, circuit (once), holdings x2, rig records, who is the payee of a harvest now, quotes, entry checks.
+    // X Layer: core, circuit (once), holdings x2, rig records, who is the payee of a harvest now, quotes, entry checks, and
+    // RigScreen.DELAY (once: a wallet rig has no pass, SPEC-PHASE5-REGISTER §7.2).
     // BSC: vault and bridge fee, keys (once), miners, owners and cell BEM, the price of a harvest, self-push price.
-    expect(w.x.calls.filter((c) => c.inner > 0)).toHaveLength(8);
+    expect(w.x.calls.filter((c) => c.inner > 0)).toHaveLength(9);
     expect(w.b.calls.filter((c) => c.inner > 0)).toHaveLength(5);
     expect(w.b.calls.filter((c) => c.to.toLowerCase() === w.config.book.reporter.toLowerCase())).toHaveLength(1);
     w.x.calls.length = 0;

@@ -45,6 +45,13 @@ Artifacts are canonical JSON (RFC 8785, every integer a decimal string, no trail
 tool prints the `recordPass` call for the owner's browser wallet (`cast send … --browser`) and the
 raw calldata. Commit the artifact first, then record; the pass takes effect 48 h later.
 
+The keeper runs these same sources for "Register to borrow", vendored in
+`keeper/src/screen/vendor/`: after a change in `src/`, run `node keeper/scripts/sync-screen.mjs` (a keeper test fails until
+the copies match). Its artifacts name `keeper-src-sha256:<hash of the vendored sources>` as their tool commit; `verify`
+reproduces them like any other. After any change of the reviewed constants, re-screen every PASS still waiting for
+the owner's signature: re-sync and redeploy the keeper, which queues them again because its tool hash changed (never
+sign a PASS made before the change).
+
 After an upgrade of PodMining or of the BSC circuits evaluator the keeper pauses borrows. Then: review
 the upgrade, update `src/constants.ts` (and `keeper/src/addresses.ts`), run `verify --now` on every
 recorded pass, revoke any pass whose results changed, and only then unpause (spec §6).
