@@ -41,7 +41,7 @@ function securityMeta(): Plugin {
 const single = process.env.TP_SINGLE === '1';
 
 export default defineConfig({
-  base: './',
+  base: single ? './' : '/',
   plugins: [securityMeta(), historyRpc(here)],
   define: { __TP_FORK__: JSON.stringify(fork) },
   build: {

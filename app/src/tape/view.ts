@@ -80,7 +80,7 @@ function mountTrace(host: HTMLElement, s: Session): { unmount(): void; translate
   const buttons: HTMLButtonElement[] = [];
   const quotes = new Map<HTMLButtonElement, Quote>();
   input.value = game.stake;
-  for (const preset of ['0.05', '0.10', '0.25', '0.50', '1', '2']) { const button = document.createElement('button'); button.type = 'button'; button.textContent = preset; button.dataset.preset = preset; find('.trace-presets').append(button); }
+  for (const preset of ['5', '10', '20', '50', '100', '200']) { const button = document.createElement('button'); button.type = 'button'; button.textContent = preset; button.dataset.preset = preset; find('.trace-presets').append(button); }
   for (let row = 0; row < ROWS; row++) for (let col = 0; col < COLS; col++) { const button = document.createElement('button'); button.type = 'button'; button.className = 'trace-cell'; button.setAttribute('role', 'gridcell'); button.tabIndex = row === 0 && col === 0 ? 0 : -1; grid.append(button); buttons.push(button); }
   function quoteText(q: Quote): string { return `${price(q.low)}–${price(q.high)} · ${time(q.start)}–${time(q.end)} · ${times(q.multiplier)} · ${money(q.stake)} BEM → ${money(payout(q.stake, q.multiplier))} BEM`; }
   function announce(message: string): void { status.textContent = message; }

@@ -97,7 +97,20 @@ export function createApp(deps: AppDeps): App {
   let traceSession: ReturnType<typeof import('./tape/view').createTraceSession> | undefined;
   let traceGeneration = 0;
   let destroyed = false;
-  let route: Route = parseHash(win.location.hash);
+  const pathRouting = win.location.hostname === 'app.tapepool.io';
+  const pathFromHash = (hash: string): string => '/' + (hash.slice(5).split('/').filter(Boolean).join('/') || 'dashboard');
+  function currentRoute(): Route {
+    if (!pathRouting) return parseHash(win.location.hash);
+    const url = new URL(win.location.href);
+    const legacy = url.hash === '#/app' || url.hash.startsWith('#/app/');
+    if (legacy || url.pathname === '/') {
+      url.pathname = legacy ? pathFromHash(url.hash) : '/markets';
+      url.hash = '';
+      win.history.replaceState(null, '', url);
+    }
+    return parseHash('#/app' + (url.pathname === '/dashboard' ? '' : url.pathname));
+  }
+  let route: Route = currentRoute();
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let inflight = false;
@@ -123,7 +136,11 @@ export function createApp(deps: AppDeps): App {
     toastTimer = setTimeout(() => deps.toast.classList.remove('tp-show'), 3200);
   }
 
-  const buildCtx = (): Ctx => makeCtx(source, ui, route, deps.inFrame);
+  const buildCtx = (): Ctx => {
+    const ctx = makeCtx(source, ui, route, deps.inFrame);
+    if (pathRouting) ctx.link = (path = '') => pathFromHash(linker(route.view)(path)) + win.location.search;
+    return ctx;
+  };
 
   function clearCopied(): void {
     if (copiedTimer) clearTimeout(copiedTimer);
@@ -194,9 +211,12 @@ export function createApp(deps: AppDeps): App {
   }
 
   function onRoute(): void {
-    const next = parseHash(win.location.hash);
+    const next = currentRoute();
     if (next.redirect !== null) {
-      win.location.replace(next.redirect);
+      if (pathRouting) {
+        win.history.replaceState(null, '', pathFromHash(next.redirect) + win.location.search);
+        onRoute();
+      } else win.location.replace(next.redirect);
       return;
     }
     if (route.page === 'trace' && next.page !== 'trace') { traceGeneration++; traceController?.unmount(); traceController = undefined; }
@@ -210,8 +230,15 @@ export function createApp(deps: AppDeps): App {
     lastKey = `${key}|${route.modal ?? ''}`;
   }
 
+  function navigate(target: string): void {
+    if (!pathRouting) { win.location.hash = target; return; }
+    const url = target.startsWith('#/app') ? pathFromHash(target) + win.location.search : target;
+    if (url !== win.location.pathname + win.location.search) win.history.pushState(null, '', url);
+    onHash();
+  }
+
   const go = (path: string): void => {
-    win.location.hash = linker(route.view)(path);
+    navigate(linker(route.view)(path));
   };
 
   /* ───────── the connect dialog and the wallet menu ───────── */
@@ -322,6 +349,7 @@ export function createApp(deps: AppDeps): App {
       const target = linker(route.view)(res.go);
       if (win.location.hash === target) render();
       else {
+        if (pathRouting) { navigate(target); return; }
         win.location.hash = target;
         // the route is read now, not when `hashchange` fires: the render that ends this action must already be on the new page,
         // or the page the result belongs to (a grouped loan opens on its lowest rig) clears the result's banner as a stale one
@@ -415,7 +443,7 @@ export function createApp(deps: AppDeps): App {
         }
         return;
       case 'go':
-        if (v?.startsWith('#/app')) win.location.hash = v;
+        if (v?.startsWith('#/app') || (pathRouting && v?.startsWith('/') && new URL(v, win.location.href).origin === win.location.origin)) navigate(v);
         return;
       case 'term': {
         ui.term = v === '1' ? 1 : 0;
@@ -646,6 +674,14 @@ export function createApp(deps: AppDeps): App {
 
   function onClick(e: Event): void {
     const target = e.target as Element | null;
+    const anchor = target?.closest<HTMLAnchorElement>('a[href]');
+    const mouse = e as MouseEvent;
+    if (pathRouting && anchor?.getAttribute('href')?.startsWith('/') && anchor.origin === win.location.origin &&
+        !anchor.target && !e.defaultPrevented && !mouse.button && !mouse.ctrlKey && !mouse.metaKey && !mouse.shiftKey && !mouse.altKey) {
+      e.preventDefault();
+      navigate(anchor.pathname + anchor.search);
+      return;
+    }
     // a click anywhere but the wallet pill and its menu closes the menu, and then does what it was going to do
     if (ui.menu && !target?.closest('.acct')) {
       ui.menu = false;
@@ -718,7 +754,7 @@ export function createApp(deps: AppDeps): App {
   };
   const onHash = (): void => {
     // another page closes the wallet menu; the same page (a hash set to what it already was) leaves it open
-    const next = parseHash(win.location.hash);
+    const next = currentRoute();
     if (next.page !== route.page || next.id !== route.id || next.view !== route.view || next.modal !== route.modal) ui.menu = false;
     onRoute();
   };
@@ -728,6 +764,7 @@ export function createApp(deps: AppDeps): App {
   doc.addEventListener('input', onInput);
   doc.addEventListener('keydown', onKey);
   deps.modal.addEventListener('click', onBackdrop);
+  if (pathRouting) win.addEventListener('popstate', onHash);
   win.addEventListener('hashchange', onHash);
   const unsubscribe = source.subscribe(() => { quoteRevision++; ui.principalQuote = null; render(); });
   // a transaction that was in flight when the page was reloaded has been mined: say how it ended
@@ -756,6 +793,7 @@ export function createApp(deps: AppDeps): App {
       doc.removeEventListener('input', onInput);
       doc.removeEventListener('keydown', onKey);
       deps.modal.removeEventListener('click', onBackdrop);
+      win.removeEventListener('popstate', onHash);
       win.removeEventListener('hashchange', onHash);
       unsubscribe();
       offSettled?.();
