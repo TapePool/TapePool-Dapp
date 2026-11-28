@@ -20,11 +20,11 @@ describe('Tape engine', () => {
   });
   it('locks a quote, debits repeated bets, pays a touch once, and resets', () => {
     const g = opened(); const q = g.quote(110500, 15000)!; const a = g.place(q)!; const b = g.place(q)!;
-    expect(g.balance).toBe(98n * UNIT / 10n); expect(a.multiplier).toBe(q.multiplier);
+    expect(g.balance).toBe(980n * UNIT); expect(a.multiplier).toBe(q.multiplier);
     for (let i = 0; i < 74; i++) g.sample(110000);
-    expect(g.sample(110500)).toHaveLength(2); expect(g.balance).toBe(98n * UNIT / 10n + 2n * payout(q.stake, q.multiplier));
+    expect(g.sample(110500)).toHaveLength(2); expect(g.balance).toBe(980n * UNIT + 2n * payout(q.stake, q.multiplier));
     g.sample(110500); expect(g.settled).toHaveLength(2); expect(b.status).toBe('won');
-    g.setStake('2'); g.reset([110_600]); expect(g.balance).toBe(10n * UNIT); expect(g.stake).toBe('0.10'); expect(g.open).toHaveLength(0); expect(g.price).toBe(110_600);
+    g.setStake('2'); g.reset([110_600]); expect(g.balance).toBe(1_000n * UNIT); expect(g.stake).toBe('10'); expect(g.open).toHaveLength(0); expect(g.price).toBe(110_600);
   });
   it('excludes high price and end time, then loses exactly once', () => {
     const g = opened(); const q = g.quote(110500, 15000)!; g.place(q);
@@ -36,7 +36,7 @@ describe('Tape engine', () => {
     const g = opened(); const q = g.quote(110500, 15000)!;
     expect(g.place({ ...q })).toBeNull(); g.setStake('0.25'); expect(g.place(q)).toBeNull();
     const later = g.quote(110500, 20000)!; for (let i = 0; i < 6; i++) g.sample(110500); expect(g.place(later)).toBeNull();
-    expect(g.quote(110500, 10000)).toBeNull(); expect(g.balance).toBe(10n * UNIT);
+    expect(g.quote(110500, 10000)).toBeNull(); expect(g.balance).toBe(1_000n * UNIT);
   });
   it('caps open tickets and settled history', () => {
     const g = opened(); g.setStake('0.05'); const q = g.quote(110500, 15000)!;

@@ -45,7 +45,7 @@ describe('Tape presentation', () => {
     visual.queue(done, game.now, game.price); expect(visual.release()).toHaveLength(0);
     expect(visual.effects).toMatchObject([{ kind: 'won', low: 110500, start: 15000, sampleTime: 15000, samplePrice: 110500, amount: payout(quote.stake, quote.multiplier) }]);
     expect(visual.notice).toMatchObject({ wins: 1, losses: 0, returned: payout(quote.stake, quote.multiplier), lost: 0n });
-    expect(game.balance).toBe(balance); expect(balance).toBe(10n * UNIT - quote.stake + payout(quote.stake, quote.multiplier));
+    expect(game.balance).toBe(balance); expect(balance).toBe(1_000n * UNIT - quote.stake + payout(quote.stake, quote.multiplier));
   });
   it('reports lost stake without a second debit and keeps the settled cell after the notice', () => {
     const game = opened(), visual = new Presentation();
@@ -69,7 +69,7 @@ describe('Tape presentation', () => {
     expect(done).toHaveLength(50); expect(visual.effects).toHaveLength(31);
     expect(visual.notice).toMatchObject({ wins: 20, losses: 30, returned: 20n * payout(win.stake, win.multiplier), lost: 30n * win.stake });
     expect(visual.effects.find(effect => effect.kind === 'won')?.count).toBe(20);
-    expect(game.balance).toBe(10n * UNIT - 50n * win.stake + 20n * payout(win.stake, win.multiplier));
+    expect(game.balance).toBe(1_000n * UNIT - 50n * win.stake + 20n * payout(win.stake, win.multiplier));
   });
   it('keeps settled cells when new bets pulse and caps each kind separately', () => {
     const game = opened(), visual = new Presentation(); game.setStake('0.05');

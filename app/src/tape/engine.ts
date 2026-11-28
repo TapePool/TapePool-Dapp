@@ -52,8 +52,11 @@ export function touch(price: number, low: number, high: number, lead: number, sp
 /** Multiplier in hundredths for a chance of a touch. */
 export const priced = (chance: number): number => Math.min(MAX_MULTIPLIER, Math.max(MIN_MULTIPLIER, Math.floor(100 * (1 - EDGE) / Math.max(chance, 1e-9))));
 /** The game on real prices: no price until an opening history is loaded, then one sample every STEP of game time. */
+const INITIAL_BALANCE = 1_000n * UNIT;
+const DEFAULT_STAKE = '10';
+
 export class Engine {
-  now = 0; price = 0; balance = 10n * UNIT; stake = '0.10'; version = 0;
+  now = 0; price = 0; balance = INITIAL_BALANCE; stake = DEFAULT_STAKE; version = 0;
   /** Realised volatility in ticks per √s, measured after every sample. */
   sigma = SIGMA_FLOOR;
   private quotes = new WeakSet<Quote>();
@@ -75,7 +78,7 @@ export class Engine {
   }
   /** Restores the session defaults on a new opening history (empty while it loads). */
   reset(opening: readonly number[]): void {
-    this.now = 0; this.balance = 10n * UNIT; this.stake = '0.10'; this.open = []; this.settled = []; this.nextId = 1; this.version++;
+    this.now = 0; this.balance = INITIAL_BALANCE; this.stake = DEFAULT_STAKE; this.open = []; this.settled = []; this.nextId = 1; this.version++;
     this.load(opening);
   }
   setStake(value: string): void { this.stake = value; this.version++; }

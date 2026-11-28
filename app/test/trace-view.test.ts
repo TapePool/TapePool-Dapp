@@ -77,7 +77,7 @@ describe('Tape view lifetime', () => {
     expect(grid.classList.contains('frozen')).toBe(false);
     // Away from the tab the market moves on: no bet may be priced on the frozen price.
     visible('hidden'); g.live.push(110_600, 300); g.clock.now = 1000; open().click();
-    expect(count(g.host, 'open')).toBe('0'); expect(g.text('.trace-balance')).toBe('10.00 BEM'); expect(g.text('.trace-status')).toContain('live price is updating');
+    expect(count(g.host, 'open')).toBe('0'); expect(g.text('.trace-balance')).toBe('1000.00 BEM'); expect(g.text('.trace-status')).toContain('live price is updating');
     expect(grid.classList.contains('frozen')).toBe(true);
     visible('visible'); g.step(1100); g.step(1300);
     expect(grid.classList.contains('frozen')).toBe(false); expect(g.text('.trace-price')).toBe('$110.60');
@@ -89,8 +89,8 @@ describe('Tape view lifetime', () => {
     const g = await running();
     const cell = g.cells().find(item => item.getAttribute('aria-label')?.startsWith('$110.50–$110.55'))!;
     // The quoted multiplier comes from recent volatility; the payout must be exactly the one shown on the cell.
-    const shown = Math.round(parseFloat(cell.textContent!) * 100), won = money(payout(UNIT / 10n, shown)), after = money(10n * UNIT - UNIT / 10n + payout(UNIT / 10n, shown));
-    cell.click(); expect(g.text('.trace-balance')).toBe('9.90 BEM');
+    const shown = Math.round(parseFloat(cell.textContent!) * 100), won = money(payout(10n * UNIT, shown)), after = money(1_000n * UNIT - 10n * UNIT + payout(10n * UNIT, shown));
+    cell.click(); expect(g.text('.trace-balance')).toBe('990.00 BEM');
     const result = g.host.querySelector<HTMLElement>('.trace-result')!;
     for (let at = 400; at <= 20_000 && result.hidden; at += 200) g.step(at, OPEN);
     expect(result.hidden).toBe(false); expect(g.text('.trace-result-title')).toBe('Won');
